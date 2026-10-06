@@ -1,8 +1,11 @@
 import type { Command } from "commander";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { loadConfig } from "../config/index.ts";
+import { renderDigest } from "../digest/terminal.ts";
 import { ingestStack } from "../ingestion/stack.ts";
 import { withErrorHandling } from "../lib/command-handler.ts";
-import { resolveTargetRepo } from "../lib/paths.ts";
+import { lastScanPath, resolveTargetRepo } from "../lib/paths.ts";
 import { printSuccess } from "../lib/output.ts";
 import { buildWorklist } from "../scan/index.ts";
 
@@ -24,16 +27,17 @@ export function registerScanCommand(program: Command): void {
         }
 
         const worklist = await buildWorklist(packages);
+        cacheLastScan(repoPath, worklist);
 
-        // Digest rendering (PER-11) lands as a follow-up; for now --json is the
-        // scriptable path and the human path is a plain summary line.
-        printSuccess(
-          worklist,
-          worklist.length === 0
-            ? "No upstream changes found."
-            : `Found ${worklist.length} package(s) with upstream changes. Run with --json for the full ranked worklist.`,
-          outputOpts,
-        );
+        // PER-11: terminal digest is the human-readable path (manual or cron
+        // invocation); --json stays the scriptable raw worklist.
+        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath }), outputOpts);
       }),
     );
+}
+
+function cacheLastScan(repoPath: string, worklist: unknown): void {
+  const cachePath = lastScanPath(repoPath);
+  mkdirSync(dirname(cachePath), { recursive: true });
+  writeFileSync(cachePath, JSON.stringify({ scannedAt: new Date().toISOString(), worklist }, null, 2));
 }

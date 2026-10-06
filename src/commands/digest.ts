@@ -1,17 +1,34 @@
 import type { Command } from "commander";
+import { existsSync, readFileSync } from "node:fs";
+import { renderDigest } from "../digest/terminal.ts";
 import { withErrorHandling } from "../lib/command-handler.ts";
-import { NotImplementedError } from "../lib/errors.ts";
+import { CliError } from "../lib/errors.ts";
+import { printSuccess } from "../lib/output.ts";
+import { lastScanPath, resolveTargetRepo } from "../lib/paths.ts";
+import type { WorklistItem } from "../scan/types.ts";
 
 export function registerDigestCommand(program: Command): void {
   program
     .command("digest")
-    .description("Render the last scan's worklist as a weekly digest (terminal or email)")
+    .description("Render the last scan's worklist as a terminal digest (email delivery lands in PER-13)")
     .action(
-      withErrorHandling(async () => {
-        throw new NotImplementedError(
-          "digest is not yet implemented — this is the CLI scaffold (PER-8). " +
-            "Terminal output (PER-11) and email delivery (PER-13) land in follow-up tickets.",
-        );
+      withErrorHandling(async (outputOpts, command) => {
+        const globalOpts = command.optsWithGlobals();
+        const repoPath = resolveTargetRepo(globalOpts.repo);
+        const cachePath = lastScanPath(repoPath);
+
+        if (!existsSync(cachePath)) {
+          throw new CliError(`No scan results found for ${repoPath} — run \`learning-radar scan\` first.`);
+        }
+
+        let worklist: WorklistItem[];
+        try {
+          ({ worklist } = JSON.parse(readFileSync(cachePath, "utf8")) as { worklist: WorklistItem[] });
+        } catch (err) {
+          throw new CliError(`Cached scan results at ${cachePath} are corrupt: ${(err as Error).message}`);
+        }
+
+        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath }), outputOpts);
       }),
     );
 }

@@ -17,6 +17,11 @@ export function globalConfigDir(): string {
   return join(homedir(), ".config", "learning-radar");
 }
 
+/** Where the most recent scan's worklist is cached, so `digest` can render it without re-scanning. */
+export function lastScanPath(repoPath: string): string {
+  return join(repoPath, ".learning-radar", "last-scan.json");
+}
+
 /** Global config: API keys and machine-wide preferences, outside any scanned repo so they can't be committed by accident. */
 export function globalConfigPath(): string {
   return join(globalConfigDir(), "config.json");

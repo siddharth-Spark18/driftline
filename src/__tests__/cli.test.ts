@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +61,34 @@ test("scan --json on a repo with no dependencies returns an empty worklist witho
   assert.match(result.stderr, /No package-lock\.json found/);
   const parsed = JSON.parse(result.stdout);
   assert.deepEqual(parsed, { ok: true, data: [] });
+});
+
+test("scan on a repo with no dependencies prints a clean terminal digest and caches the result", () => {
+  writeFileSync(join(tmpRepo, "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
+
+  const result = runCli(["--repo", tmpRepo, "scan"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Learning Radar digest/);
+  assert.match(result.stdout, /Nothing to report/);
+  assert.equal(existsSync(join(tmpRepo, ".learning-radar", "last-scan.json")), true);
+});
+
+test("digest renders the cached worklist from the last scan without re-scanning", () => {
+  writeFileSync(join(tmpRepo, "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
+  runCli(["--repo", tmpRepo, "scan"]);
+
+  const result = runCli(["--repo", tmpRepo, "digest"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Learning Radar digest/);
+  assert.match(result.stdout, /Nothing to report/);
+});
+
+test("digest exits clearly when no scan has been run yet", () => {
+  const result = runCli(["--repo", tmpRepo, "digest"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /run `learning-radar scan` first/);
 });
 
 test("unknown subcommand is a usage error (exit code 2)", () => {
