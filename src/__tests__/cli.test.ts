@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,18 +38,29 @@ test("--help exits 0 and lists the registered subcommands", () => {
   assert.match(result.stdout, /digest/);
 });
 
-test("scan stub exits non-zero with a clear not-implemented message", () => {
+test("scan against a repo with no package.json exits with a usage error", () => {
   const result = runCli(["--repo", tmpRepo, "scan"]);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /scan is not yet implemented/);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /No package\.json found/);
 });
 
 test("scan --json emits a structured error envelope on stderr", () => {
   const result = runCli(["--repo", tmpRepo, "--json", "scan"]);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 2);
   const parsed = JSON.parse(result.stdout || result.stderr);
   assert.equal(parsed.ok, false);
-  assert.equal(parsed.error.code, "GeneralError");
+  assert.equal(parsed.error.code, "UsageError");
+});
+
+test("scan --json on a repo with no dependencies returns an empty worklist without hitting the network", () => {
+  writeFileSync(join(tmpRepo, "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
+
+  const result = runCli(["--repo", tmpRepo, "--json", "scan"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /No package-lock\.json found/);
+  const parsed = JSON.parse(result.stdout);
+  assert.deepEqual(parsed, { ok: true, data: [] });
 });
 
 test("unknown subcommand is a usage error (exit code 2)", () => {
