@@ -1,0 +1,39 @@
+{
+  "name": "learning-radar",
+  "version": "0.1.0",
+  "description": "Scan your npm/JS dependency manifest for upstream changes and turn them into an agent-ready worklist.",
+  "keywords": [
+    "cli",
+    "dependencies",
+    "npm",
+    "upgrades",
+    "ai-agent"
+  ],
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "learning-radar": "./dist/cli.js"
+  },
+  "main": "./dist/cli.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  }
+}
