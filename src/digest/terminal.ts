@@ -15,6 +15,13 @@ const CATEGORY_LABELS: Record<WorklistItem["category"], string> = {
   minor: "Minor / feature updates",
 };
 
+const CATEGORY_SUMMARY_NOUN: Record<WorklistItem["category"], { singular: string; plural: string }> = {
+  security: { singular: "security fix", plural: "security fixes" },
+  breaking: { singular: "breaking change", plural: "breaking changes" },
+  deprecation: { singular: "deprecation", plural: "deprecations" },
+  minor: { singular: "minor / feature update", plural: "minor / feature updates" },
+};
+
 const ANSI = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -61,7 +68,10 @@ function summaryLine(items: WorklistItem[]): string {
   for (const item of items) counts[item.category] += 1;
 
   return CATEGORY_ORDER.filter((category) => counts[category] > 0)
-    .map((category) => `${counts[category]} ${CATEGORY_LABELS[category].toLowerCase()}`)
+    .map((category) => {
+      const noun = CATEGORY_SUMMARY_NOUN[category];
+      return `${counts[category]} ${counts[category] === 1 ? noun.singular : noun.plural}`;
+    })
     .join(", ");
 }
 

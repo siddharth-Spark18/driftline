@@ -43,7 +43,7 @@ describe("renderDigest", () => {
     const output = renderDigest(items, { color: false, repoLabel: "/repo" });
 
     assert.match(output, /Learning Radar digest — \/repo/);
-    assert.match(output, /1 security fix(es)?, 1 breaking change(s)?, 1 minor/);
+    assert.match(output, /1 security fix, 1 breaking change, 1 minor \/ feature update$/m);
 
     const securityIdx = output.indexOf("Security fixes");
     const breakingIdx = output.indexOf("Breaking changes");
@@ -54,6 +54,16 @@ describe("renderDigest", () => {
     assert.match(output, /2\. major-pkg \(1\.0\.0 -> 2\.0\.0\)/);
     assert.match(output, /3\. low-pkg \(1\.0\.0 -> 1\.1\.0\)/);
     assert.match(output, /https:\/\/osv\.dev\/X/);
+  });
+
+  it("pluralizes the summary line's category nouns when a count is greater than one", () => {
+    const items: WorklistItem[] = [
+      { name: "a", currentVersion: "1.0.0", latestVersion: "1.0.1", category: "security", reason: "r" },
+      { name: "b", currentVersion: "1.0.0", latestVersion: "1.0.1", category: "security", reason: "r" },
+    ];
+    const output = renderDigest(items, { color: false });
+    assert.match(output, /2 security fixes/);
+    assert.doesNotMatch(output, /2 security fix,/);
   });
 
   it("omits a severity badge when severity is unknown", () => {
