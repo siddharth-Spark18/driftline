@@ -1,4 +1,4 @@
-// Exit code conventions for the Learning Radar CLI. Other tickets (scan engine,
+// Exit code conventions for the Driftline CLI. Other tickets (scan engine,
 // digest, config) should throw these rather than calling process.exit directly,
 // so exit codes and --json error shapes stay consistent everywhere.
 

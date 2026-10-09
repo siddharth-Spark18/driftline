@@ -69,9 +69,9 @@ test("scan on a repo with no dependencies prints a clean terminal digest and cac
   const result = runCli(["--repo", tmpRepo, "scan"]);
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /Learning Radar digest/);
+  assert.match(result.stdout, /Driftline digest/);
   assert.match(result.stdout, /Nothing to report/);
-  assert.equal(existsSync(join(tmpRepo, ".learning-radar", "last-scan.json")), true);
+  assert.equal(existsSync(join(tmpRepo, ".driftline", "last-scan.json")), true);
 });
 
 test("digest renders the cached worklist from the last scan without re-scanning", () => {
@@ -81,14 +81,14 @@ test("digest renders the cached worklist from the last scan without re-scanning"
   const result = runCli(["--repo", tmpRepo, "digest"]);
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /Learning Radar digest/);
+  assert.match(result.stdout, /Driftline digest/);
   assert.match(result.stdout, /Nothing to report/);
 });
 
 test("digest exits clearly when no scan has been run yet", () => {
   const result = runCli(["--repo", tmpRepo, "digest"]);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /run `learning-radar scan` first/);
+  assert.match(result.stderr, /run `driftline scan` first/);
 });
 
 test("unknown subcommand is a usage error (exit code 2)", () => {

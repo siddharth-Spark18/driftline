@@ -18,17 +18,22 @@ export function registerDigestCommand(program: Command): void {
         const cachePath = lastScanPath(repoPath);
 
         if (!existsSync(cachePath)) {
-          throw new CliError(`No scan results found for ${repoPath} — run \`learning-radar scan\` first.`);
+          throw new CliError(`No scan results found for ${repoPath} — run \`driftline scan\` first.`);
         }
 
         let worklist: WorklistItem[];
+        let overflow: number | undefined;
         try {
-          ({ worklist } = JSON.parse(readFileSync(cachePath, "utf8")) as { worklist: WorklistItem[] });
+          // `overflow` is absent in caches written before PER-12.
+          ({ worklist, overflow } = JSON.parse(readFileSync(cachePath, "utf8")) as {
+            worklist: WorklistItem[];
+            overflow?: number;
+          });
         } catch (err) {
           throw new CliError(`Cached scan results at ${cachePath} are corrupt: ${(err as Error).message}`);
         }
 
-        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath }), outputOpts);
+        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow }), outputOpts);
       }),
     );
 }

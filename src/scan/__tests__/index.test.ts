@@ -34,7 +34,7 @@ function fakeFetch(options: {
     }
 
     if (url.startsWith("https://api.github.com/repos/")) {
-      const match = url.match(/repos\/([^/]+)\/([^/]+)\/releases\/latest/);
+      const match = url.match(/repos\/([^/]+)\/([^/]+)\/releases\/tags\/v\d/);
       const key = match ? `${match[1]}/${match[2]}` : "";
       const data = releases[key];
       if (!data) return { ok: false, json: async () => ({}) } as Response;

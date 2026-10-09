@@ -30,7 +30,7 @@ test("loadConfig returns empty config with no sources when nothing is on disk", 
 
 test("writeGlobalConfigValue persists under the global config dir and loadConfig picks it up", () => {
   const path = writeGlobalConfigValue("apiKeys.anthropic", "sk-ant-test-12345");
-  assert.ok(path.includes(".config/learning-radar/config.json"));
+  assert.ok(path.includes(".config/driftline/config.json"));
 
   const { config, sources } = loadConfig({ repoPath: tmpRepo });
   assert.equal(config.apiKeys?.anthropic, "sk-ant-test-12345");
@@ -42,7 +42,7 @@ test("project config overrides global config on conflicting keys, global fills t
   writeGlobalConfigValue("apiKeys.anthropic", "global-key");
 
   writeFileSync(
-    join(tmpRepo, ".learningradarrc.json"),
+    join(tmpRepo, ".driftlinerc.json"),
     JSON.stringify({ preferences: { ignorePackages: ["left-pad"] } }),
   );
 

@@ -33,3 +33,20 @@ export function rankWorklist(items: WorklistItem[]): WorklistItem[] {
     return a.name.localeCompare(b.name);
   });
 }
+
+export interface CappedWorklist {
+  items: WorklistItem[];
+  /** How many ranked items were cut by the cap. */
+  overflow: number;
+}
+
+/**
+ * Applies the top-N cap to an already-ranked worklist. Security items are never
+ * dropped, so the result can exceed `maxItems` when there are more than that
+ * many security items.
+ */
+export function capWorklist(ranked: WorklistItem[], maxItems: number): CappedWorklist {
+  const securityCount = ranked.filter((item) => item.category === "security").length;
+  const keep = Math.max(maxItems, securityCount);
+  return { items: ranked.slice(0, keep), overflow: Math.max(0, ranked.length - keep) };
+}

@@ -12,12 +12,12 @@ interface LatestVersionDoc {
   repository?: unknown;
 }
 
-function registryUrlFor(name: string): string {
+function registryUrlFor(name: string, suffix = "/latest"): string {
   if (name.startsWith("@")) {
     const [scope, pkg] = name.split("/");
-    return `https://registry.npmjs.org/${scope}%2F${pkg}/latest`;
+    return `https://registry.npmjs.org/${scope}%2F${pkg}${suffix}`;
   }
-  return `https://registry.npmjs.org/${name}/latest`;
+  return `https://registry.npmjs.org/${name}${suffix}`;
 }
 
 /**
@@ -50,4 +50,34 @@ export async function fetchLatestVersion(name: string, fetchImpl: FetchLike = fe
     deprecated: typeof data.deprecated === "string" ? data.deprecated : undefined,
     repositoryUrl: typeof repositoryUrl === "string" ? repositoryUrl : undefined,
   };
+}
+
+/**
+ * Looks up when a specific version was published. The `time` map only exists on
+ * the full packument (the `/latest` document omits it), so this is a separate,
+ * heavier request made only for packages that already made it onto the worklist.
+ * Returns an ISO string, or `undefined` when unavailable or unparseable.
+ */
+export async function fetchPublishTime(
+  name: string,
+  version: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<string | undefined> {
+  let res: Response;
+  try {
+    res = await fetchImpl(registryUrlFor(name, ""));
+  } catch {
+    return undefined;
+  }
+  if (!res.ok) return undefined;
+
+  let data: { time?: Record<string, unknown> };
+  try {
+    data = (await res.json()) as { time?: Record<string, unknown> };
+  } catch {
+    return undefined;
+  }
+  const published = data.time?.[version];
+  if (typeof published !== "string" || Number.isNaN(Date.parse(published))) return undefined;
+  return new Date(published).toISOString();
 }

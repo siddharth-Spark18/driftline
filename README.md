@@ -1,4 +1,4 @@
-# Learning Radar
+# Driftline
 
 A CLI that scans your npm/JS dependency manifest for upstream changes — new
 releases, deprecations, advisories — and turns them into a ranked,
@@ -13,13 +13,13 @@ until their respective tickets (PER-9/10/11/12/13) land.
 ## Usage
 
 ```sh
-learning-radar scan                 # scan the current directory
-learning-radar --repo ../other-repo scan
-learning-radar --json scan          # machine-readable output, for scripting
+driftline scan                 # scan the current directory
+driftline --repo ../other-repo scan
+driftline --json scan          # machine-readable output, for scripting
 
-learning-radar config set apiKeys.anthropic sk-ant-...
-learning-radar config get preferences.ignorePackages
-learning-radar config list
+driftline config set apiKeys.anthropic sk-ant-...
+driftline config get preferences.ignorePackages
+driftline config list
 ```
 
 ## Global flags
@@ -34,10 +34,10 @@ learning-radar config list
 
 Two files are merged (project overrides global):
 
-- **Global** — `~/.config/learning-radar/config.json`. Written by
+- **Global** — `~/.config/driftline/config.json`. Written by
   `config set`; this is where API keys belong, since it's never inside a
   scanned repo and so can't be committed by accident.
-- **Project** — `<repo>/.learningradarrc.json`. Optional, meant to be
+- **Project** — `<repo>/.driftlinerc.json`. Optional, meant to be
   checked in for non-secret preferences (e.g. `preferences.ignorePackages`).
 
 `config list` always masks `apiKeys.*` values.

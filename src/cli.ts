@@ -12,7 +12,7 @@ const pkg = readOwnPackageJson();
 const program = new Command();
 
 program
-  .name("learning-radar")
+  .name("driftline")
   .description("Scan your dependency manifest for upstream changes and turn them into an agent-ready worklist.")
   .version(pkg.version, "-v, --version")
   .option("--json", "output machine-readable JSON instead of human-readable text", false)

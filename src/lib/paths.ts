@@ -10,16 +10,16 @@ export function resolveTargetRepo(repoOption?: string): string {
 
 /** Project-local config: preferences devs may want to check into the scanned repo (never secrets). */
 export function projectConfigPath(repoPath: string): string {
-  return join(repoPath, ".learningradarrc.json");
+  return join(repoPath, ".driftlinerc.json");
 }
 
 export function globalConfigDir(): string {
-  return join(homedir(), ".config", "learning-radar");
+  return join(homedir(), ".config", "driftline");
 }
 
 /** Where the most recent scan's worklist is cached, so `digest` can render it without re-scanning. */
 export function lastScanPath(repoPath: string): string {
-  return join(repoPath, ".learning-radar", "last-scan.json");
+  return join(repoPath, ".driftline", "last-scan.json");
 }
 
 /** Global config: API keys and machine-wide preferences, outside any scanned repo so they can't be committed by accident. */
@@ -38,5 +38,5 @@ export function readOwnPackageJson(): PackageMetadata {
   const pkgPath = join(here, "..", "..", "package.json");
   const raw = readFileSync(pkgPath, "utf8");
   const parsed = JSON.parse(raw) as Partial<PackageMetadata>;
-  return { name: parsed.name ?? "learning-radar", version: parsed.version ?? "0.0.0" };
+  return { name: parsed.name ?? "driftline", version: parsed.version ?? "0.0.0" };
 }

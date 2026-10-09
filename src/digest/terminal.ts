@@ -1,9 +1,12 @@
+import { cooldownMessage } from "../scan/cooldown.ts";
 import type { WorklistItem } from "../scan/types.ts";
 
 export interface RenderOptions {
   /** Defaults to detecting a real TTY so cron/log output stays plain, uncolored text. */
   color?: boolean;
   repoLabel?: string;
+  /** Items cut by the top-N cap; rendered as a "+N more" line. */
+  overflow?: number;
 }
 
 const CATEGORY_ORDER: WorklistItem["category"][] = ["security", "breaking", "deprecation", "minor"];
@@ -36,7 +39,7 @@ export function renderDigest(items: WorklistItem[], options: RenderOptions = {})
   const color = options.color ?? Boolean(process.stdout.isTTY);
   const lines: string[] = [];
 
-  lines.push(paint(`Learning Radar digest${options.repoLabel ? ` — ${options.repoLabel}` : ""}`, color, ANSI.bold));
+  lines.push(paint(`Driftline digest${options.repoLabel ? ` — ${options.repoLabel}` : ""}`, color, ANSI.bold));
 
   if (items.length === 0) {
     lines.push("");
@@ -58,6 +61,11 @@ export function renderDigest(items: WorklistItem[], options: RenderOptions = {})
       lines.push(formatItem(item, index, color));
       index += 1;
     }
+  }
+
+  if (options.overflow && options.overflow > 0) {
+    lines.push("");
+    lines.push(paint(`+${options.overflow} more (raise the cap with --limit or preferences.maxItems)`, color, ANSI.dim));
   }
 
   return lines.join("\n");
@@ -84,7 +92,14 @@ function formatItem(item: WorklistItem, index: number, color: boolean): string {
   const reasonLine = `     ${item.reason}`;
   const link = item.advisoryUrl ?? item.releaseUrl;
 
-  return [header, reasonLine, link ? `     ${paint(link, color, ANSI.dim)}` : null].filter(Boolean).join("\n");
+  const usageLine = item.affectedFiles
+    ? `     ${item.affectedFiles.length === 0 ? "no usage detected" : `${item.affectedFiles.length} affected ${item.affectedFiles.length === 1 ? "file" : "files"}`}`
+    : null;
+  const cooldownLine = item.cooldown ? `     ${paint(cooldownMessage(item.cooldown.daysOld), color, ANSI.yellow)}` : null;
+
+  return [header, reasonLine, usageLine, cooldownLine, link ? `     ${paint(link, color, ANSI.dim)}` : null]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function categoryColor(category: WorklistItem["category"]): string {

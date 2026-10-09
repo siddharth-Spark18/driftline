@@ -42,7 +42,7 @@ describe("renderDigest", () => {
 
     const output = renderDigest(items, { color: false, repoLabel: "/repo" });
 
-    assert.match(output, /Learning Radar digest — \/repo/);
+    assert.match(output, /Driftline digest — \/repo/);
     assert.match(output, /1 security fix, 1 breaking change, 1 minor \/ feature update$/m);
 
     const securityIdx = output.indexOf("Security fixes");

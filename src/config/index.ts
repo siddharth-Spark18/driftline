@@ -2,9 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { ConfigError } from "../lib/errors.ts";
 import { globalConfigPath, projectConfigPath } from "../lib/paths.ts";
-import { CONFIG_KEY_PREFIXES, type LearningRadarConfig } from "./types.ts";
+import {
+  CONFIG_KEY_PREFIXES,
+  DEFAULT_COOLDOWN_DAYS,
+  DEFAULT_MAX_ITEMS,
+  type DriftlineConfig,
+} from "./types.ts";
 
-export type { LearningRadarConfig } from "./types.ts";
+export type { DriftlineConfig } from "./types.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -47,15 +52,15 @@ export interface LoadConfigOptions {
 }
 
 export interface LoadedConfig {
-  config: LearningRadarConfig;
+  config: DriftlineConfig;
   /** Files that were actually found and merged in, in merge order (earlier = lower precedence). */
   sources: string[];
 }
 
 /**
  * Resolution order (highest precedence last): built-in defaults, global config
- * (~/.config/learning-radar/config.json — API keys live here so they can't be
- * committed by accident), then project config (<repo>/.learningradarrc.json —
+ * (~/.config/driftline/config.json — API keys live here so they can't be
+ * committed by accident), then project config (<repo>/.driftlinerc.json —
  * non-secret preferences meant to be checked in). --config bypasses all of this
  * and loads a single file verbatim, for scripting/CI use.
  */
@@ -65,7 +70,7 @@ export function loadConfig(opts: LoadConfigOptions): LoadedConfig {
       throw new ConfigError(`Config file not found: ${opts.explicitConfigPath}`);
     }
     return {
-      config: readJsonFile(opts.explicitConfigPath) as LearningRadarConfig,
+      config: readJsonFile(opts.explicitConfigPath) as DriftlineConfig,
       sources: [opts.explicitConfigPath],
     };
   }
@@ -80,7 +85,7 @@ export function loadConfig(opts: LoadConfigOptions): LoadedConfig {
     }
   }
 
-  return { config: merged as LearningRadarConfig, sources };
+  return { config: merged as DriftlineConfig, sources };
 }
 
 export function getByPath(obj: JsonObject, keyPath: string): unknown {
@@ -115,16 +120,17 @@ function assertKnownKey(keyPath: string): void {
  */
 export function writeGlobalConfigValue(keyPath: string, value: string): string {
   assertKnownKey(keyPath);
+  const typedValue = keyPath in NUMERIC_PREFERENCES ? parseNumericPreference(keyPath, value) : value;
   const path = globalConfigPath();
   const existing = readJsonFile(path);
-  setByPath(existing, keyPath, value);
+  setByPath(existing, keyPath, typedValue);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 });
   return path;
 }
 
 /** Masks secret values (anything under apiKeys.*) so `config list` never prints them in full. */
-export function redactSecrets(config: LearningRadarConfig): LearningRadarConfig {
+export function redactSecrets(config: DriftlineConfig): DriftlineConfig {
   const clone = JSON.parse(JSON.stringify(config)) as JsonObject;
   const apiKeys = clone.apiKeys;
   if (isPlainObject(apiKeys)) {
@@ -135,5 +141,40 @@ export function redactSecrets(config: LearningRadarConfig): LearningRadarConfig 
       }
     }
   }
-  return clone as LearningRadarConfig;
+  return clone as DriftlineConfig;
+}
+
+// Numeric preference keys and their lower bound (maxItems must keep at least one item; 0 cooldown days disables the flag).
+const NUMERIC_PREFERENCES: Record<string, { min: number }> = {
+  "preferences.maxItems": { min: 1 },
+  "preferences.cooldownDays": { min: 0 },
+};
+
+function parseNumericPreference(keyPath: string, value: unknown): number {
+  const { min } = NUMERIC_PREFERENCES[keyPath];
+  // `config set` only ever passes strings, so accept numeric strings as well as numbers from JSON files.
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isInteger(parsed) || parsed < min) {
+    throw new ConfigError(`${keyPath} must be an integer >= ${min}, got ${JSON.stringify(value)}`);
+  }
+  return parsed;
+}
+
+export interface ScanSettings {
+  maxItems: number;
+  cooldownDays: number;
+  githubToken?: string;
+}
+
+/** Validates and defaults the scan-related config values. `GITHUB_TOKEN` in the environment wins over `apiKeys.github`. */
+export function resolveScanSettings(config: DriftlineConfig): ScanSettings {
+  const { maxItems, cooldownDays } = config.preferences ?? {};
+  return {
+    maxItems: maxItems === undefined ? DEFAULT_MAX_ITEMS : parseNumericPreference("preferences.maxItems", maxItems),
+    cooldownDays:
+      cooldownDays === undefined
+        ? DEFAULT_COOLDOWN_DAYS
+        : parseNumericPreference("preferences.cooldownDays", cooldownDays),
+    githubToken: process.env.GITHUB_TOKEN || config.apiKeys?.github || undefined,
+  };
 }

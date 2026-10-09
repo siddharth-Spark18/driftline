@@ -1,18 +1,33 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import semver from "semver";
+import { buildPrompt, findVerifyScripts } from "../prompt/build.ts";
 import { fetchAdvisories, type Advisory } from "./advisories.ts";
+import { computeCooldown } from "./cooldown.ts";
 import { rankWorklist } from "./rank.ts";
-import { fetchLatestVersion } from "./registry.ts";
-import { describeRelease } from "./releases.ts";
+import { fetchLatestVersion, fetchPublishTime } from "./registry.ts";
+import { describeRelease, type ReleaseLookupState } from "./releases.ts";
 import type { InstalledPackage, Severity, WorklistItem } from "./types.ts";
+import { detectUsage } from "./usage.ts";
 
 export type { InstalledPackage, WorklistItem, UpdateCategory, Severity } from "./types.ts";
-export { rankWorklist } from "./rank.ts";
+export { rankWorklist, capWorklist } from "./rank.ts";
 
 type FetchLike = typeof fetch;
 
 export interface ScanOptions {
   fetchImpl?: FetchLike;
+  /** Repo to run affected-file detection and prompt generation against. Both are skipped when omitted. */
+  repoPath?: string;
+  /** Latest releases younger than this many days are flagged (never held back). Default 3; 0 disables. */
+  cooldownDays?: number;
+  /** Optional GitHub token for release lookups. */
+  githubToken?: string;
+  /** Receives non-fatal problems (e.g. GitHub rate limiting) so the caller decides how to surface them. */
+  onWarning?: (message: string) => void;
 }
+
+const DEFAULT_COOLDOWN_DAYS = 3;
 
 const SEVERITY_ORDER: Record<Severity, number> = {
   critical: 0,
@@ -35,12 +50,67 @@ export async function buildWorklist(
 ): Promise<WorklistItem[]> {
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  const items = await Promise.all(packages.map((pkg) => scanPackage(pkg, fetchImpl)));
+  const cooldownDays = options.cooldownDays ?? DEFAULT_COOLDOWN_DAYS;
+  const releaseState: ReleaseLookupState = { token: options.githubToken, rateLimited: false };
 
-  return rankWorklist(items.filter((item): item is WorklistItem => item !== null));
+  const scanned = await Promise.all(packages.map((pkg) => scanPackage(pkg, fetchImpl, releaseState)));
+  const items = scanned.filter((item): item is WorklistItem => item !== null);
+
+  if (releaseState.rateLimited) {
+    options.onWarning?.(
+      "GitHub rate limit hit (set GITHUB_TOKEN or apiKeys.github to raise it) — skipped release notes for the remaining packages.",
+    );
+  }
+
+  await Promise.all(
+    items.map(async (item) => {
+      item.releasedAt = await fetchPublishTime(item.name, item.latestVersion, fetchImpl);
+      const cooldown = computeCooldown(item.releasedAt, cooldownDays);
+      if (cooldown) item.cooldown = cooldown;
+    }),
+  );
+  for (const item of items) {
+    if (!item.releasedAt) delete item.releasedAt;
+  }
+
+  if (options.repoPath) attachUsageAndPrompts(options.repoPath, items);
+
+  return rankWorklist(items);
 }
 
-async function scanPackage(pkg: InstalledPackage, fetchImpl: FetchLike): Promise<WorklistItem | null> {
+/** Runs one detection pass for every item, then builds prompts for the actionable ones. */
+function attachUsageAndPrompts(repoPath: string, items: WorklistItem[]): void {
+  if (items.length === 0) return;
+
+  const usage = detectUsage(
+    repoPath,
+    items.map((item) => item.name),
+  );
+  const context = { verifyScripts: readVerifyScripts(repoPath) };
+
+  for (const item of items) {
+    item.affectedFiles = usage.get(item.name) ?? [];
+    item.usageDetected = item.affectedFiles.length > 0;
+    const prompt = buildPrompt(item, context);
+    if (prompt) item.prompt = prompt;
+  }
+}
+
+function readVerifyScripts(repoPath: string): string[] {
+  const pkgPath = join(repoPath, "package.json");
+  if (!existsSync(pkgPath)) return [];
+  try {
+    return findVerifyScripts((JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: unknown }).scripts);
+  } catch {
+    return [];
+  }
+}
+
+async function scanPackage(
+  pkg: InstalledPackage,
+  fetchImpl: FetchLike,
+  releaseState: ReleaseLookupState,
+): Promise<WorklistItem | null> {
   if (!pkg.installedVersion) return null; // nothing to diff without a resolved version
 
   const registryInfo = await fetchLatestVersion(pkg.name, fetchImpl);
@@ -70,7 +140,12 @@ async function scanPackage(pkg: InstalledPackage, fetchImpl: FetchLike): Promise
   };
 
   if (isBreakingBump(registryInfo.latestVersion, pkg.installedVersion)) {
-    const release = await describeRelease(registryInfo.repositoryUrl, fetchImpl);
+    const release = await describeRelease(
+      registryInfo.repositoryUrl,
+      { name: pkg.name, version: registryInfo.latestVersion },
+      releaseState,
+      fetchImpl,
+    );
     return {
       ...base,
       category: "breaking",
@@ -87,7 +162,12 @@ async function scanPackage(pkg: InstalledPackage, fetchImpl: FetchLike): Promise
     };
   }
 
-  const release = await describeRelease(registryInfo.repositoryUrl, fetchImpl);
+  const release = await describeRelease(
+    registryInfo.repositoryUrl,
+    { name: pkg.name, version: registryInfo.latestVersion },
+    releaseState,
+    fetchImpl,
+  );
   return {
     ...base,
     category: "minor",

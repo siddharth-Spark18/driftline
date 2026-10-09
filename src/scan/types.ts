@@ -15,8 +15,8 @@ export type Severity = "critical" | "high" | "moderate" | "low" | "unknown";
 
 /**
  * Output contract: one entry per package with a change, ranked by priority
- * (security > breaking > deprecation > minor). This is what the
- * prompt-generation ticket (PER-12) consumes.
+ * (security > breaking > deprecation > minor). The optional fields added by
+ * PER-12 are additive, so older cached `last-scan.json` files stay readable.
  */
 export interface WorklistItem {
   name: string;
@@ -27,4 +27,22 @@ export interface WorklistItem {
   reason: string;
   releaseUrl?: string;
   advisoryUrl?: string;
+  /** Files that reference this package, found by local regex detection. Absent when detection didn't run. */
+  affectedFiles?: AffectedFile[];
+  /** `false` when detection ran and found no file referencing the package. */
+  usageDetected?: boolean;
+  /** ISO publish date of `latestVersion` from the npm registry `time` field. */
+  releasedAt?: string;
+  /** Set when `latestVersion` is younger than the cooldown window. Flag only: never demotes or hides the item. */
+  cooldown?: { daysOld: number };
+  /** Ready-to-paste agent prompt. Only built for security, breaking and deprecation items. */
+  prompt?: string;
+}
+
+export type UsageConfidence = "high" | "medium" | "low";
+
+export interface AffectedFile {
+  /** Path relative to the scanned repo root, with forward slashes. */
+  path: string;
+  confidence: UsageConfidence;
 }

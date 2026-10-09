@@ -8,7 +8,7 @@ import { resolveTargetRepo } from "../lib/paths.ts";
 export function registerConfigCommand(program: Command): void {
   const config = program
     .command("config")
-    .description("Read or update Learning Radar configuration (API keys, preferences)");
+    .description("Read or update Driftline configuration (API keys, preferences)");
 
   config
     .command("list")
@@ -50,7 +50,7 @@ export function registerConfigCommand(program: Command): void {
 
   config
     .command("set <key> <value>")
-    .description("Set a value in the global config file (~/.config/learning-radar/config.json)")
+    .description("Set a value in the global config file (~/.config/driftline/config.json)")
     .action(
       withErrorHandling(async (outputOpts, _command, key: string, value: string) => {
         const path = writeGlobalConfigValue(key, value);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeRelease, fetchLatestRelease, parseGithubRepo, summarizeReleaseBody } from "../releases.ts";
+import { describeRelease, fetchReleaseByTag, parseGithubRepo, summarizeReleaseBody } from "../releases.ts";
 
 test("parseGithubRepo handles common npm registry repository URL shapes", () => {
   assert.deepEqual(parseGithubRepo("git+https://github.com/acme/pkg.git"), { owner: "acme", repo: "pkg" });
@@ -28,12 +28,12 @@ test("summarizeReleaseBody truncates long lines", () => {
   assert.ok(result?.endsWith("..."));
 });
 
-test("fetchLatestRelease returns null on a non-ok response", async () => {
+test("fetchReleaseByTag returns null on a non-ok response", async () => {
   const fetchImpl = (async () => ({ ok: false, json: async () => ({}) }) as Response) as typeof fetch;
-  assert.equal(await fetchLatestRelease({ owner: "acme", repo: "pkg" }, fetchImpl), null);
+  assert.equal(await fetchReleaseByTag({ owner: "acme", repo: "pkg" }, "v1.0.0", { rateLimited: false }, fetchImpl), null);
 });
 
-test("fetchLatestRelease parses tag, url, and body from the GitHub API response", async () => {
+test("fetchReleaseByTag parses tag, url, and body from the GitHub API response", async () => {
   const fetchImpl = (async () =>
     ({
       ok: true,
@@ -44,7 +44,7 @@ test("fetchLatestRelease parses tag, url, and body from the GitHub API response"
       }),
     }) as Response) as typeof fetch;
 
-  const release = await fetchLatestRelease({ owner: "acme", repo: "pkg" }, fetchImpl);
+  const release = await fetchReleaseByTag({ owner: "acme", repo: "pkg" }, "v2.0.0", { rateLimited: false }, fetchImpl);
 
   assert.deepEqual(release, {
     tagName: "v2.0.0",
@@ -57,7 +57,7 @@ test("describeRelease returns null when the repository URL isn't GitHub", async 
   const fetchImpl = (async () => {
     throw new Error("should not be called");
   }) as typeof fetch;
-  assert.equal(await describeRelease("https://gitlab.com/acme/pkg", fetchImpl), null);
+  assert.equal(await describeRelease("https://gitlab.com/acme/pkg", { name: "pkg", version: "1.0.0" }, { rateLimited: false }, fetchImpl), null);
 });
 
 test("describeRelease falls back to a generic reason when the release body is empty", async () => {
@@ -67,7 +67,12 @@ test("describeRelease falls back to a generic reason when the release body is em
       json: async () => ({ tag_name: "v3.0.0", html_url: "https://github.com/acme/pkg/releases/tag/v3.0.0", body: null }),
     }) as Response) as typeof fetch;
 
-  const described = await describeRelease("https://github.com/acme/pkg", fetchImpl);
+  const described = await describeRelease(
+    "https://github.com/acme/pkg",
+    { name: "pkg", version: "3.0.0" },
+    { rateLimited: false },
+    fetchImpl,
+  );
 
   assert.deepEqual(described, {
     reason: "New release: v3.0.0.",

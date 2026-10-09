@@ -1,5 +1,5 @@
 {
-  "name": "learning-radar",
+  "name": "driftline",
   "version": "0.1.0",
   "description": "Scan your npm/JS dependency manifest for upstream changes and turn them into an agent-ready worklist.",
   "keywords": [
@@ -12,7 +12,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "bin": {
-    "learning-radar": "./dist/cli.js"
+    "driftline": "./dist/cli.js"
   },
   "main": "./dist/cli.js",
   "files": [
