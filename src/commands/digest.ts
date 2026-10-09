@@ -1,16 +1,18 @@
 import type { Command } from "commander";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { renderDigest } from "../digest/terminal.ts";
 import { withErrorHandling } from "../lib/command-handler.ts";
 import { CliError } from "../lib/errors.ts";
 import { printSuccess } from "../lib/output.ts";
-import { lastScanPath, resolveTargetRepo } from "../lib/paths.ts";
+import { lastScanPath, readOwnPackageJson, resolveTargetRepo } from "../lib/paths.ts";
 import type { WorklistItem } from "../scan/types.ts";
+import { addReportOptions, resolveSaveChoice, saveReport } from "./report-output.ts";
 
 export function registerDigestCommand(program: Command): void {
-  program
+  const digest = program
     .command("digest")
-    .description("Render the last scan's worklist as a terminal digest (email delivery lands in PER-13)")
+    .description("Render the last scan's worklist as a terminal digest (email delivery lands in PER-13)");
+  addReportOptions(digest)
     .action(
       withErrorHandling(async (outputOpts, command) => {
         const globalOpts = command.optsWithGlobals();
@@ -23,17 +25,34 @@ export function registerDigestCommand(program: Command): void {
 
         let worklist: WorklistItem[];
         let overflow: number | undefined;
+        let scannedAt: string | undefined;
         try {
           // `overflow` is absent in caches written before PER-12.
-          ({ worklist, overflow } = JSON.parse(readFileSync(cachePath, "utf8")) as {
+          ({ worklist, overflow, scannedAt } = JSON.parse(readFileSync(cachePath, "utf8")) as {
             worklist: WorklistItem[];
             overflow?: number;
+            scannedAt?: string;
           });
         } catch (err) {
           throw new CliError(`Cached scan results at ${cachePath} are corrupt: ${(err as Error).message}`);
         }
 
+        // Asked after the cache is validated, so a missing scan fails before any prompt.
+        const saveChoice = await resolveSaveChoice(globalOpts);
+        if (saveChoice === "cancelled") return;
+
         printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow }), outputOpts);
+        saveReport(
+          saveChoice,
+          {
+            scannedAt: scannedAt ?? statSync(cachePath).mtime.toISOString(),
+            repo: repoPath,
+            driftlineVersion: readOwnPackageJson().version,
+            overflow: overflow ?? 0,
+            worklist,
+          },
+          outputOpts,
+        );
       }),
     );
 }

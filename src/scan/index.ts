@@ -25,6 +25,8 @@ export interface ScanOptions {
   githubToken?: string;
   /** Receives non-fatal problems (e.g. GitHub rate limiting) so the caller decides how to surface them. */
   onWarning?: (message: string) => void;
+  /** Receives a short label as each scan phase begins, so a caller can show progress. */
+  onProgress?: (step: string) => void;
 }
 
 const DEFAULT_COOLDOWN_DAYS = 3;
@@ -53,6 +55,7 @@ export async function buildWorklist(
   const cooldownDays = options.cooldownDays ?? DEFAULT_COOLDOWN_DAYS;
   const releaseState: ReleaseLookupState = { token: options.githubToken, rateLimited: false };
 
+  options.onProgress?.(`Checking ${packages.length} ${packages.length === 1 ? "package" : "packages"} against the registry and advisories`);
   const scanned = await Promise.all(packages.map((pkg) => scanPackage(pkg, fetchImpl, releaseState)));
   const items = scanned.filter((item): item is WorklistItem => item !== null);
 
@@ -62,6 +65,7 @@ export async function buildWorklist(
     );
   }
 
+  if (items.length > 0) options.onProgress?.("Looking up release dates");
   await Promise.all(
     items.map(async (item) => {
       item.releasedAt = await fetchPublishTime(item.name, item.latestVersion, fetchImpl);
@@ -73,6 +77,7 @@ export async function buildWorklist(
     if (!item.releasedAt) delete item.releasedAt;
   }
 
+  if (options.repoPath && items.length > 0) options.onProgress?.("Detecting affected files and building prompts");
   if (options.repoPath) attachUsageAndPrompts(options.repoPath, items);
 
   return rankWorklist(items);

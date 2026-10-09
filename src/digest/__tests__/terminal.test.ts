@@ -42,17 +42,21 @@ describe("renderDigest", () => {
 
     const output = renderDigest(items, { color: false, repoLabel: "/repo" });
 
-    assert.match(output, /Driftline digest — \/repo/);
-    assert.match(output, /1 security fix, 1 breaking change, 1 minor \/ feature update$/m);
+    assert.match(output, /Driftline digest/);
+    assert.match(output, /\/repo/);
+    assert.match(output, /1 security fix {2}\S 1 breaking change {2}\S 1 minor \/ feature update/);
 
     const securityIdx = output.indexOf("Security fixes");
     const breakingIdx = output.indexOf("Breaking changes");
     const minorIdx = output.indexOf("Minor / feature updates");
     assert.ok(securityIdx > -1 && breakingIdx > securityIdx && minorIdx > breakingIdx);
 
-    assert.match(output, /1\. vuln-pkg \[CRITICAL\] \(1\.0\.0 -> 1\.0\.1\)/);
-    assert.match(output, /2\. major-pkg \(1\.0\.0 -> 2\.0\.0\)/);
-    assert.match(output, /3\. low-pkg \(1\.0\.0 -> 1\.1\.0\)/);
+    assert.match(output, /1\. vuln-pkg +\[SECURITY\] \[CRITICAL\]/);
+    assert.match(output, /1\.0\.0 -> 1\.0\.1/);
+    assert.match(output, /2\. major-pkg/);
+    assert.match(output, /1\.0\.0 -> 2\.0\.0/);
+    assert.match(output, /3\. low-pkg/);
+    assert.match(output, /1\.0\.0 -> 1\.1\.0/);
     assert.match(output, /https:\/\/osv\.dev\/X/);
   });
 
