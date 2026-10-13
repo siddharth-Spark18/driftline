@@ -98,6 +98,9 @@ function record(found: Map<string, FoundFiles>, name: string, path: string, conf
 function scanSource(text: string, relPath: string, wanted: Set<string>, found: Map<string, FoundFiles>): void {
   for (const match of text.matchAll(MODULE_REFERENCE)) {
     const specifier = match[2];
+    // Checked before the package-name parse, which rejects `node:` specifiers.
+    if (wanted.has("@types/node") && isNodeBuiltin(specifier)) record(found, "@types/node", relPath, "medium");
+
     const name = packageNameFromSpecifier(specifier);
     if (!name) continue;
 
@@ -107,7 +110,6 @@ function scanSource(text: string, relPath: string, wanted: Set<string>, found: M
     // `@types/foo` is never imported itself; it is used wherever `foo` is.
     const typesName = `@types/${name.startsWith("@") ? name.slice(1).replace("/", "__") : name}`;
     if (wanted.has(typesName)) record(found, typesName, relPath, "medium");
-    if (wanted.has("@types/node") && isNodeBuiltin(specifier)) record(found, "@types/node", relPath, "medium");
   }
 }
 

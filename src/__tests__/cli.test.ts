@@ -60,7 +60,7 @@ test("scan --json on a repo with no dependencies returns an empty worklist witho
   assert.equal(result.status, 0);
   assert.match(result.stderr, /No package-lock\.json found/);
   const parsed = JSON.parse(result.stdout);
-  assert.deepEqual(parsed, { ok: true, data: [] });
+  assert.deepEqual(parsed, { ok: true, data: [], overflow: 0 });
 });
 
 test("scan on a repo with no dependencies prints a clean terminal digest and caches the result", () => {
@@ -107,7 +107,7 @@ test("config set/get/list round-trip through the global config file", () => {
   const listResult = runCli(["--json", "config", "list"]);
   assert.equal(listResult.status, 0);
   const parsed = JSON.parse(listResult.stdout);
-  assert.equal(parsed.data.config.preferences.ignorePackages, "left-pad");
+  assert.deepEqual(parsed.data.config.preferences.ignorePackages, ["left-pad"]);
 });
 
 test("config set masks secrets on a subsequent list, never printing the raw key", () => {

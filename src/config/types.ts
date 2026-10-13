@@ -13,7 +13,7 @@ export interface DriftlineConfig {
     github?: string;
   };
   preferences?: {
-    /** Package names to exclude from scan results entirely. */
+    /** Package names or simple globs (e.g. `@types/*`) hidden from scan results; a known advisory is still shown. */
     ignorePackages?: string[];
     /** Max worklist items shown by `scan`; security items are never dropped. Default 10. */
     maxItems?: number;

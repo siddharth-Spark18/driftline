@@ -4,7 +4,9 @@ import semver from "semver";
 import { buildPrompt, findVerifyScripts } from "../prompt/build.ts";
 import { fetchAdvisories, type Advisory } from "./advisories.ts";
 import { computeCooldown } from "./cooldown.ts";
-import { rankWorklist } from "./rank.ts";
+import { createIgnoreMatcher } from "./ignore.ts";
+import { loadPublishCache, publishCacheKey, savePublishCache, type PublishTimes } from "./publish-cache.ts";
+import { capWorklist, rankWorklist } from "./rank.ts";
 import { fetchLatestVersion, fetchPublishTime } from "./registry.ts";
 import { describeRelease, type ReleaseLookupState } from "./releases.ts";
 import type { InstalledPackage, Severity, WorklistItem } from "./types.ts";
@@ -27,6 +29,21 @@ export interface ScanOptions {
   onWarning?: (message: string) => void;
   /** Receives a short label as each scan phase begins, so a caller can show progress. */
   onProgress?: (step: string) => void;
+  /** Package names or simple globs (`@types/*`) to hide. They skip registry and release lookups; a known advisory is still reported. */
+  ignorePackages?: string[];
+  /** Top-N cap applied before the publish-time lookup and usage detection. Security items are never dropped. Uncapped when omitted. */
+  maxItems?: number;
+  /** Disk cache file for publish times. No caching when omitted. */
+  publishCachePath?: string;
+}
+
+export interface ScanResult {
+  /** Ranked, and capped when `maxItems` was given. */
+  items: WorklistItem[];
+  /** Items cut by the cap. */
+  overflow: number;
+  /** Packages hidden by the ignore list (ignored packages shown because of an advisory are not counted). */
+  ignored: number;
 }
 
 const DEFAULT_COOLDOWN_DAYS = 3;
@@ -39,25 +56,35 @@ const SEVERITY_ORDER: Record<Severity, number> = {
   unknown: 4,
 };
 
+/** The ranked (uncapped unless `maxItems` is set) worklist; see `runScan` for the overflow and ignore counts. */
+export async function buildWorklist(
+  packages: InstalledPackage[],
+  options: ScanOptions = {},
+): Promise<WorklistItem[]> {
+  return (await runScan(packages, options)).items;
+}
+
 /**
  * The scan engine (PER-10): diffs each installed package's version against
  * the npm registry, pulls release notes + advisories for anything that
  * changed, and returns a ranked worklist — security fix > breaking change >
  * deprecation > minor/feature — for the prompt-generation ticket (PER-12)
- * to consume.
+ * to consume. The cap runs before the per-item publish-time lookup, so only
+ * the items that will be shown cost an extra request.
  */
-export async function buildWorklist(
-  packages: InstalledPackage[],
-  options: ScanOptions = {},
-): Promise<WorklistItem[]> {
+export async function runScan(packages: InstalledPackage[], options: ScanOptions = {}): Promise<ScanResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const cooldownDays = options.cooldownDays ?? DEFAULT_COOLDOWN_DAYS;
   const releaseState: ReleaseLookupState = { token: options.githubToken, rateLimited: false };
+  const isIgnored = createIgnoreMatcher(options.ignorePackages ?? []);
 
   options.onProgress?.(`Checking ${packages.length} ${packages.length === 1 ? "package" : "packages"} against the registry and advisories`);
-  const scanned = await Promise.all(packages.map((pkg) => scanPackage(pkg, fetchImpl, releaseState)));
-  const items = scanned.filter((item): item is WorklistItem => item !== null);
+  const scanned = await Promise.all(
+    packages.map((pkg) => scanPackage(pkg, fetchImpl, releaseState, isIgnored(pkg.name))),
+  );
+  const found = scanned.filter((item): item is WorklistItem => item !== null);
+  const ignored = packages.filter((pkg) => isIgnored(pkg.name)).length - found.filter((item) => item.ignored).length;
 
   if (releaseState.rateLimited) {
     options.onWarning?.(
@@ -65,22 +92,43 @@ export async function buildWorklist(
     );
   }
 
-  if (items.length > 0) options.onProgress?.("Looking up release dates");
-  await Promise.all(
-    items.map(async (item) => {
-      item.releasedAt = await fetchPublishTime(item.name, item.latestVersion, fetchImpl);
-      const cooldown = computeCooldown(item.releasedAt, cooldownDays);
-      if (cooldown) item.cooldown = cooldown;
-    }),
-  );
-  for (const item of items) {
-    if (!item.releasedAt) delete item.releasedAt;
-  }
+  const ranked = rankWorklist(found);
+  const { items, overflow } = options.maxItems === undefined ? { items: ranked, overflow: 0 } : capWorklist(ranked, options.maxItems);
+
+  await attachPublishTimes(items, cooldownDays, fetchImpl, options);
 
   if (options.repoPath && items.length > 0) options.onProgress?.("Detecting affected files and building prompts");
   if (options.repoPath) attachUsageAndPrompts(options.repoPath, items);
 
-  return rankWorklist(items);
+  return { items, overflow, ignored };
+}
+
+/** Looks up publish times (disk cache first) and flags young releases. Ignored items never reach the registry. */
+async function attachPublishTimes(
+  items: WorklistItem[],
+  cooldownDays: number,
+  fetchImpl: FetchLike,
+  options: ScanOptions,
+): Promise<void> {
+  const lookups = items.filter((item) => !item.ignored);
+  if (lookups.length > 0) options.onProgress?.("Looking up release dates");
+
+  const cached: PublishTimes = options.publishCachePath ? loadPublishCache(options.publishCachePath) : {};
+  const fresh: PublishTimes = {};
+  await Promise.all(
+    lookups.map(async (item) => {
+      const key = publishCacheKey(item.name, item.latestVersion);
+      const releasedAt = cached[key] ?? (await fetchPublishTime(item.name, item.latestVersion, fetchImpl));
+      if (!releasedAt) return;
+
+      // Only successful, parseable times are cached; failures are retried next run.
+      if (!(key in cached)) fresh[key] = releasedAt;
+      item.releasedAt = releasedAt;
+      const cooldown = computeCooldown(releasedAt, cooldownDays);
+      if (cooldown) item.cooldown = cooldown;
+    }),
+  );
+  if (options.publishCachePath) savePublishCache(options.publishCachePath, fresh);
 }
 
 /** Runs one detection pass for every item, then builds prompts for the actionable ones. */
@@ -96,7 +144,8 @@ function attachUsageAndPrompts(repoPath: string, items: WorklistItem[]): void {
   for (const item of items) {
     item.affectedFiles = usage.get(item.name) ?? [];
     item.usageDetected = item.affectedFiles.length > 0;
-    const prompt = buildPrompt(item, context);
+    // An ignored package is only shown for its advisory; no upgrade task is generated for it.
+    const prompt = item.ignored ? null : buildPrompt(item, context);
     if (prompt) item.prompt = prompt;
   }
 }
@@ -115,8 +164,26 @@ async function scanPackage(
   pkg: InstalledPackage,
   fetchImpl: FetchLike,
   releaseState: ReleaseLookupState,
+  ignored: boolean,
 ): Promise<WorklistItem | null> {
   if (!pkg.installedVersion) return null; // nothing to diff without a resolved version
+
+  // Ignored packages skip the registry and release lookups, but a known advisory is still worth showing.
+  if (ignored) {
+    const advisories = await fetchAdvisories(pkg.name, pkg.installedVersion, fetchImpl);
+    if (advisories.length === 0) return null;
+    const worst = mostSevere(advisories);
+    return {
+      name: pkg.name,
+      currentVersion: pkg.installedVersion,
+      latestVersion: pkg.installedVersion, // not looked up for ignored packages
+      category: "security",
+      severity: worst.severity,
+      reason: worst.summary,
+      advisoryUrl: worst.url,
+      ignored: true,
+    };
+  }
 
   const registryInfo = await fetchLatestVersion(pkg.name, fetchImpl);
   if (!registryInfo) return null;

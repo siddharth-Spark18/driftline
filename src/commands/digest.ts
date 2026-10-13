@@ -25,12 +25,14 @@ export function registerDigestCommand(program: Command): void {
 
         let worklist: WorklistItem[];
         let overflow: number | undefined;
+        let ignored: number | undefined;
         let scannedAt: string | undefined;
         try {
-          // `overflow` is absent in caches written before PER-12.
-          ({ worklist, overflow, scannedAt } = JSON.parse(readFileSync(cachePath, "utf8")) as {
+          // `overflow` is absent in caches written before PER-12, `ignored` in those before the ignore list.
+          ({ worklist, overflow, ignored, scannedAt } = JSON.parse(readFileSync(cachePath, "utf8")) as {
             worklist: WorklistItem[];
             overflow?: number;
+            ignored?: number;
             scannedAt?: string;
           });
         } catch (err) {
@@ -41,7 +43,9 @@ export function registerDigestCommand(program: Command): void {
         const saveChoice = await resolveSaveChoice(globalOpts);
         if (saveChoice === "cancelled") return;
 
-        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow }), outputOpts);
+        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow, ignored }), outputOpts, {
+          overflow: overflow ?? 0,
+        });
         saveReport(
           saveChoice,
           {

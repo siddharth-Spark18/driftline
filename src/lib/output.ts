@@ -4,9 +4,10 @@ export interface OutputOptions {
   json: boolean;
 }
 
-export function printSuccess(data: unknown, message: string, opts: OutputOptions): void {
+/** `extra` adds top-level fields next to `data` in the --json envelope (e.g. `overflow`); human output is unaffected. */
+export function printSuccess(data: unknown, message: string, opts: OutputOptions, extra: Record<string, unknown> = {}): void {
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, data })}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: true, data, ...extra })}\n`);
   } else {
     console.log(message);
   }

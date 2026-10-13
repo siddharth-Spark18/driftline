@@ -25,7 +25,7 @@ cd your-project          # needs a package.json and a lockfile
 driftline scan
 ```
 
-In a terminal, Driftline first asks whether you want the report as terminal output only, or saved as a JSON or Markdown file. Then it scans and prints a digest:
+In a terminal, Driftline first asks whether you want the report as terminal output only, or saved as a JSON or Markdown file. Then it scans and prints a digest. Press Ctrl+C to cancel the menu and exit without scanning.
 
 - a summary bar of what it found (security fixes, breaking changes, deprecations, minor updates)
 - one card per package with its versions, the reason, how many files use it, and a link to the release or advisory
@@ -62,7 +62,7 @@ Files are named like `driftline-2026-10-09T14-30-05.md` and are never overwritte
 
 Global:
 
-- `--json`: print `{ ok, data }` / `{ ok: false, error }` envelopes instead of human-readable text.
+- `--json`: print `{ ok, data }` / `{ ok: false, error }` envelopes instead of human-readable text. `scan` and `digest` also include `overflow`, the number of items hidden by the cap (`0` when none): `{ "ok": true, "data": [...], "overflow": 0 }`.
 - `--repo <path>`: the project to scan (defaults to the current directory).
 - `--config <path>`: use one config file and skip the project/global lookup.
 
@@ -78,6 +78,8 @@ Global:
 
 Set `NO_COLOR=1` to turn colors off. The layout stays the same.
 
+Release dates are cached in `$XDG_CACHE_HOME/driftline` (or `~/.cache/driftline`), so repeat scans don't download them again. The cache holds only package names, versions and publish times, and is safe to delete.
+
 ## Configuration
 
 Two files are merged, with the project file taking priority:
@@ -89,12 +91,16 @@ Two files are merged, with the project file taking priority:
 |---|---|---|
 | `preferences.maxItems` | Maximum items shown by `scan` | `10` |
 | `preferences.cooldownDays` | Flag releases younger than this many days | `3` |
+| `preferences.ignorePackages` | Packages to hide from the report: names or simple globs such as `@types/*` (`*` matches any characters except `/`) | none |
 | `apiKeys.github` | GitHub token for release-note lookups (the `GITHUB_TOKEN` environment variable takes precedence) | none |
 
 A GitHub token is optional. Without one, GitHub allows about 60 requests per hour; if you hit that limit Driftline skips release notes for the rest of the run and warns you instead of failing.
 
+Ignored packages skip the registry and release lookups and are left out of the report, and the digest ends with an "N ignored" note. A known security advisory on the installed version is still shown, marked as being on your ignore list.
+
 ```sh
 driftline config set preferences.maxItems 5
+driftline config set preferences.ignorePackages "@types/*,typescript"   # comma-separated, stored as a list
 driftline config list     # API key values are masked
 ```
 
