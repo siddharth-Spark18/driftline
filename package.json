@@ -1,6 +1,6 @@
 {
   "name": "driftline",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "Scan your npm/JS dependency manifest for upstream changes and turn them into an agent-ready worklist.",
   "keywords": [
     "cli",
@@ -9,7 +9,16 @@
     "upgrades",
     "ai-agent"
   ],
-  "license": "UNLICENSED",
+  "author": "Siddharth Paneri",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/siddharth-Spark18/driftline.git"
+  },
+  "homepage": "https://github.com/siddharth-Spark18/driftline#readme",
+  "bugs": {
+    "url": "https://github.com/siddharth-Spark18/driftline/issues"
+  },
   "type": "module",
   "bin": {
     "driftline": "./dist/cli.js"
@@ -25,7 +34,7 @@
     "build": "tsc -p .",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "devDependencies": {
