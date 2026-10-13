@@ -68,15 +68,47 @@ export async function fetchReleaseByTag(
   };
 }
 
-/** Pulls the first non-empty, non-heading line out of a release body as a short reason. */
+const URL_ONLY = /^(https?:\/\/|www\.)\S+$/i;
+const FULL_CHANGELOG = /^full changelog\b/i;
+
+/**
+ * Pulls the first meaningful line out of a release body as a short plain-text
+ * reason. Skips headings, code blocks, rules, badges, URL-only lines and
+ * "Full Changelog" lines; markdown is stripped. Returns null when nothing
+ * usable is left, so callers fall back to the generic version-bump reason.
+ */
 export function summarizeReleaseBody(body: string | null, maxLength = 160): string | null {
   if (!body) return null;
-  const firstLine = body
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0 && !line.startsWith("#"));
-  if (!firstLine) return null;
-  return firstLine.length > maxLength ? `${firstLine.slice(0, maxLength - 3)}...` : firstLine;
+
+  let inCodeBlock = false;
+  for (const raw of body.replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("```") || line.startsWith("~~~")) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock || line.startsWith("#") || /^([-*_])(\s*\1){2,}$/.test(line)) continue;
+
+    const text = stripMarkdown(line);
+    if (!text || URL_ONLY.test(text) || FULL_CHANGELOG.test(text)) continue;
+    return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+  }
+  return null;
+}
+
+/** Reduces one markdown line to plain text. Images and badges vanish entirely; links keep their text. */
+function stripMarkdown(line: string): string {
+  return line
+    .replace(/<(https?:\/\/[^>\s]+)>/g, "$1")
+    .replace(/<\/?[a-zA-Z][^>]*>/g, "")
+    .replace(/!\[[^\]]*\](\([^)]*\)|\[[^\]]*\])?/g, "")
+    .replace(/\[([^\]]*)\](\([^)]*\)|\[[^\]]*\])/g, "$1")
+    .replace(/^(>\s*)+/, "")
+    .replace(/^([-*+]|\d+\.)\s+(\[[ xX]\]\s+)?/, "")
+    .replace(/(\*\*|__|~~|`)/g, "")
+    .replace(/\*(\S[^*]*)\*/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export interface ReleaseDescription {

@@ -120,7 +120,12 @@ function assertKnownKey(keyPath: string): void {
  */
 export function writeGlobalConfigValue(keyPath: string, value: string): string {
   assertKnownKey(keyPath);
-  const typedValue = keyPath in NUMERIC_PREFERENCES ? parseNumericPreference(keyPath, value) : value;
+  const typedValue =
+    keyPath in NUMERIC_PREFERENCES
+      ? parseNumericPreference(keyPath, value)
+      : keyPath === IGNORE_PACKAGES_KEY
+        ? parseIgnorePackages(value.split(","))
+        : value;
   const path = globalConfigPath();
   const existing = readJsonFile(path);
   setByPath(existing, keyPath, typedValue);
@@ -160,21 +165,39 @@ function parseNumericPreference(keyPath: string, value: unknown): number {
   return parsed;
 }
 
+const IGNORE_PACKAGES_KEY = "preferences.ignorePackages";
+
+/** Package names or simple globs; must be a list of non-empty strings. `config set` passes the comma-split input. */
+function parseIgnorePackages(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+    throw new ConfigError(`${IGNORE_PACKAGES_KEY} must be a list of package names or globs, got ${JSON.stringify(value)}`);
+  }
+  const names = (value as string[]).map((entry) => entry.trim());
+  // `config set ... ""` splits to [""], which means "clear the list".
+  const cleaned = names.length === 1 && names[0] === "" ? [] : names;
+  if (cleaned.some((entry) => entry === "")) {
+    throw new ConfigError(`${IGNORE_PACKAGES_KEY} must not contain empty entries, got ${JSON.stringify(value)}`);
+  }
+  return cleaned;
+}
+
 export interface ScanSettings {
   maxItems: number;
   cooldownDays: number;
+  ignorePackages: string[];
   githubToken?: string;
 }
 
 /** Validates and defaults the scan-related config values. `GITHUB_TOKEN` in the environment wins over `apiKeys.github`. */
 export function resolveScanSettings(config: DriftlineConfig): ScanSettings {
-  const { maxItems, cooldownDays } = config.preferences ?? {};
+  const { maxItems, cooldownDays, ignorePackages } = config.preferences ?? {};
   return {
     maxItems: maxItems === undefined ? DEFAULT_MAX_ITEMS : parseNumericPreference("preferences.maxItems", maxItems),
     cooldownDays:
       cooldownDays === undefined
         ? DEFAULT_COOLDOWN_DAYS
         : parseNumericPreference("preferences.cooldownDays", cooldownDays),
+    ignorePackages: ignorePackages === undefined ? [] : parseIgnorePackages(ignorePackages),
     githubToken: process.env.GITHUB_TOKEN || config.apiKeys?.github || undefined,
   };
 }

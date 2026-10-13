@@ -36,7 +36,7 @@ export function buildMarkdownReport(data: ReportData): string {
 
 function renderItem(item: WorklistItem, index: number): string[] {
   const severity = item.category === "security" && item.severity && item.severity !== "unknown" ? ` [${item.severity.toUpperCase()}]` : "";
-  const lines = [`### ${index}. ${item.name}${severity}`, "", `\`${item.currentVersion}\` -> \`${item.latestVersion}\``, "", item.reason];
+  const lines = [`### ${index}. ${item.name}${severity}`, "", item.ignored ? `\`${item.currentVersion}\` (on your ignore list; shown because of this advisory)` : `\`${item.currentVersion}\` -> \`${item.latestVersion}\``, "", item.reason];
 
   const details: string[] = [];
   if (item.affectedFiles) {

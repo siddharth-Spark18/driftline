@@ -9,6 +9,8 @@ export interface RenderOptions {
   repoLabel?: string;
   /** Items cut by the top-N cap; rendered as a "+N more" line. */
   overflow?: number;
+  /** Packages hidden by `preferences.ignorePackages`; rendered as an "N ignored" note. */
+  ignored?: number;
   /** Defaults to the terminal width (80 when unknown); clamped to a readable range. */
   width?: number;
 }
@@ -85,6 +87,7 @@ export function renderDigest(items: WorklistItem[], options: RenderOptions = {})
   if (items.length === 0) {
     lines.push("");
     lines.push("Nothing to report — tracked dependencies are up to date and clear of known advisories.");
+    lines.push(...ignoredNote(options.ignored, pc));
     return lines.join("\n");
   }
 
@@ -110,7 +113,13 @@ export function renderDigest(items: WorklistItem[], options: RenderOptions = {})
     lines.push(pc.dim(`+${options.overflow} more (raise the cap with --limit or preferences.maxItems)`));
   }
 
+  lines.push(...ignoredNote(options.ignored, pc));
+
   return lines.join("\n");
+}
+
+function ignoredNote(ignored: number | undefined, pc: Colors): string[] {
+  return ignored && ignored > 0 ? ["", pc.dim(`${ignored} ignored (preferences.ignorePackages)`)] : [];
 }
 
 function renderBanner(repoLabel: string | undefined, width: number, g: Glyphs, pc: Colors): string[] {
@@ -187,7 +196,9 @@ function renderCard(item: WorklistItem, index: number, width: number, g: Glyphs,
     rows.push(`${v} ${badgesStyled}${" ".repeat(Math.max(0, inner - badgesPlain.length))} ${v}`);
   }
 
-  rows.push(...body(`${item.currentVersion} ${g.arrow} ${item.latestVersion}`, pc.bold));
+  // Ignored packages aren't checked against the registry, so there is no "latest" to show.
+  rows.push(...body(item.ignored ? item.currentVersion : `${item.currentVersion} ${g.arrow} ${item.latestVersion}`, pc.bold));
+  if (item.ignored) rows.push(...body("on your ignore list (shown because of this advisory)", pc.dim));
   rows.push(...body(item.reason));
 
   if (item.affectedFiles) {

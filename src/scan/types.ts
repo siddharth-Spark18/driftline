@@ -35,6 +35,8 @@ export interface WorklistItem {
   releasedAt?: string;
   /** Set when `latestVersion` is younger than the cooldown window. Flag only: never demotes or hides the item. */
   cooldown?: { daysOld: number };
+  /** Set when the package is on `preferences.ignorePackages` but has a known advisory, so it is shown anyway. */
+  ignored?: boolean;
   /** Ready-to-paste agent prompt. Only built for security, breaking and deprecation items. */
   prompt?: string;
 }

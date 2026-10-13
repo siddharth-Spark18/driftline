@@ -8,7 +8,8 @@ import { withErrorHandling } from "../lib/command-handler.ts";
 import { UsageError } from "../lib/errors.ts";
 import { lastScanPath, readOwnPackageJson, resolveTargetRepo } from "../lib/paths.ts";
 import { printSuccess } from "../lib/output.ts";
-import { buildWorklist, capWorklist } from "../scan/index.ts";
+import { publishCachePath } from "../scan/publish-cache.ts";
+import { runScan } from "../scan/index.ts";
 import { createSpinner } from "../ui/spinner.ts";
 import { addReportOptions, resolveSaveChoice, saveReport } from "./report-output.ts";
 
@@ -40,12 +41,15 @@ export function registerScanCommand(program: Command): void {
         if (saveChoice === "cancelled") return;
 
         const spinner = createSpinner(Boolean(process.stderr.isTTY) && !outputOpts.json);
-        let ranked;
+        let result;
         try {
           spinner.start("Scanning");
-          ranked = await buildWorklist(packages, {
+          result = await runScan(packages, {
             repoPath,
             cooldownDays,
+            maxItems,
+            ignorePackages: settings.ignorePackages,
+            publishCachePath: publishCachePath(),
             githubToken: settings.githubToken,
             onWarning: (message) => spinner.log(`driftline: warning: ${message}`),
             onProgress: (step) => spinner.update(step),
@@ -53,13 +57,13 @@ export function registerScanCommand(program: Command): void {
         } finally {
           spinner.stop();
         }
-        const { items: worklist, overflow } = capWorklist(ranked, maxItems);
+        const { items: worklist, overflow, ignored } = result;
         const scannedAt = new Date().toISOString();
-        cacheLastScan(repoPath, worklist, overflow, scannedAt);
+        cacheLastScan(repoPath, worklist, overflow, ignored, scannedAt);
 
         // PER-11: terminal digest is the human-readable path (manual or cron
         // invocation); --json stays the scriptable raw worklist.
-        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow }), outputOpts);
+        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow, ignored }), outputOpts, { overflow });
         // After the digest so a write failure (exit 1) still leaves the result on screen.
         saveReport(
           saveChoice,
@@ -79,8 +83,8 @@ function parseIntegerFlag(flag: string, raw: unknown, min: number): number | und
   return value;
 }
 
-function cacheLastScan(repoPath: string, worklist: unknown, overflow: number, scannedAt: string): void {
+function cacheLastScan(repoPath: string, worklist: unknown, overflow: number, ignored: number, scannedAt: string): void {
   const cachePath = lastScanPath(repoPath);
   mkdirSync(dirname(cachePath), { recursive: true });
-  writeFileSync(cachePath, JSON.stringify({ scannedAt, worklist, overflow }, null, 2));
+  writeFileSync(cachePath, JSON.stringify({ scannedAt, worklist, overflow, ignored }, null, 2));
 }
