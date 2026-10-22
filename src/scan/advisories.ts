@@ -2,11 +2,31 @@ import type { Severity } from "./types.ts";
 
 type FetchLike = typeof fetch;
 
+/**
+ * `compromised` covers OSV malicious-package entries (`MAL-...`) and advisories
+ * tagged CWE-506 (embedded malicious code); everything else is a `vulnerability`.
+ */
+export type AdvisoryKind = "compromised" | "vulnerability";
+
+/** One affected span from an OSV SEMVER range: `introduced` inclusive, then `fixed` exclusive or `last_affected` inclusive. */
+export interface AffectedInterval {
+  introduced: string;
+  fixed?: string;
+  lastAffected?: string;
+}
+
 export interface Advisory {
   id: string;
   summary: string;
   severity: Severity;
   url: string;
+  kind: AdvisoryKind;
+  /** Affected spans for the scanned package only (an advisory can list several packages). */
+  intervals: AffectedInterval[];
+  /** Every `fixed` version in `intervals`. */
+  fixedVersions: string[];
+  /** Versions OSV lists explicitly for the scanned package. */
+  affectedVersions: string[];
 }
 
 /**
@@ -36,11 +56,11 @@ export async function fetchAdvisories(
   const vulns = Array.isArray(data.vulns) ? data.vulns : [];
 
   return vulns
-    .map((vuln: Record<string, unknown>) => toAdvisory(vuln))
+    .map((vuln: Record<string, unknown>) => toAdvisory(vuln, name))
     .filter((advisory: Advisory | null): advisory is Advisory => advisory !== null);
 }
 
-function toAdvisory(vuln: Record<string, unknown>): Advisory | null {
+function toAdvisory(vuln: Record<string, unknown>, packageName: string): Advisory | null {
   if (typeof vuln.id !== "string") return null;
 
   const summary =
@@ -49,6 +69,8 @@ function toAdvisory(vuln: Record<string, unknown>): Advisory | null {
       : typeof vuln.details === "string"
         ? vuln.details.slice(0, 200)
         : "No summary available.";
+
+  const { intervals, affectedVersions } = readAffected(vuln, packageName);
 
   const references = Array.isArray(vuln.references) ? vuln.references : [];
   const advisoryRef = references.find(
@@ -61,7 +83,63 @@ function toAdvisory(vuln: Record<string, unknown>): Advisory | null {
     summary,
     severity: severityOf(vuln),
     url: advisoryRef?.url ?? `https://osv.dev/vulnerability/${vuln.id}`,
+    kind: kindOf(vuln),
+    intervals,
+    fixedVersions: intervals.flatMap((interval) => (interval.fixed ? [interval.fixed] : [])),
+    affectedVersions,
   };
+}
+
+function kindOf(vuln: Record<string, unknown>): AdvisoryKind {
+  if ((vuln.id as string).startsWith("MAL-")) return "compromised";
+  const cweIds = (vuln.database_specific as { cwe_ids?: unknown } | undefined)?.cwe_ids;
+  return Array.isArray(cweIds) && cweIds.includes("CWE-506") ? "compromised" : "vulnerability";
+}
+
+/** Reads the `affected[]` entries for this npm package only, ignoring other packages the advisory lists. */
+function readAffected(
+  vuln: Record<string, unknown>,
+  packageName: string,
+): { intervals: AffectedInterval[]; affectedVersions: string[] } {
+  const intervals: AffectedInterval[] = [];
+  const affectedVersions: string[] = [];
+  const affected = Array.isArray(vuln.affected) ? vuln.affected : [];
+
+  for (const entry of affected as Record<string, unknown>[]) {
+    const pkg = entry?.package as { name?: unknown; ecosystem?: unknown } | undefined;
+    if (!pkg || pkg.name !== packageName || pkg.ecosystem !== "npm") continue;
+
+    if (Array.isArray(entry.versions)) {
+      for (const version of entry.versions) if (typeof version === "string") affectedVersions.push(version);
+    }
+    const ranges = Array.isArray(entry.ranges) ? entry.ranges : [];
+    for (const range of ranges as Record<string, unknown>[]) {
+      // GIT and ECOSYSTEM ranges don't carry semver-comparable versions.
+      if (range?.type !== "SEMVER" || !Array.isArray(range.events)) continue;
+      intervals.push(...intervalsFromEvents(range.events as Record<string, unknown>[]));
+    }
+  }
+  return { intervals, affectedVersions };
+}
+
+/** Walks OSV events in order: `introduced` opens a span, `fixed` / `last_affected` closes it. */
+function intervalsFromEvents(events: Record<string, unknown>[]): AffectedInterval[] {
+  const intervals: AffectedInterval[] = [];
+  let open: AffectedInterval | null = null;
+  for (const event of events) {
+    if (typeof event?.introduced === "string") {
+      if (open) intervals.push(open);
+      open = { introduced: event.introduced };
+    } else if (open && typeof event?.fixed === "string") {
+      intervals.push({ ...open, fixed: event.fixed });
+      open = null;
+    } else if (open && typeof event?.last_affected === "string") {
+      intervals.push({ ...open, lastAffected: event.last_affected });
+      open = null;
+    }
+  }
+  if (open) intervals.push(open);
+  return intervals;
 }
 
 function severityOf(vuln: Record<string, unknown>): Severity {

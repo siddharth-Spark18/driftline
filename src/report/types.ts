@@ -1,4 +1,4 @@
-import type { WorklistItem } from "../scan/types.ts";
+import type { SkippedSummary, WorklistItem } from "../scan/types.ts";
 
 export type ReportFormat = "json" | "markdown";
 
@@ -9,5 +9,7 @@ export interface ReportData {
   driftlineVersion: string;
   /** Items cut by the top-N cap. */
   overflow: number;
+  /** Packages that couldn't be checked. Absent for scans cached before this was tracked. */
+  skipped?: SkippedSummary;
   worklist: WorklistItem[];
 }

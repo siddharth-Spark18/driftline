@@ -3,9 +3,10 @@ import type { WorklistItem } from "../scan/types.ts";
 export type Category = WorklistItem["category"];
 
 /** Priority order shared by the terminal digest and the saved reports. */
-export const CATEGORY_ORDER: Category[] = ["security", "breaking", "deprecation", "minor"];
+export const CATEGORY_ORDER: Category[] = ["compromised", "security", "breaking", "deprecation", "minor"];
 
 export const CATEGORY_LABELS: Record<Category, string> = {
+  compromised: "Compromised packages",
   security: "Security fixes",
   breaking: "Breaking changes",
   deprecation: "Deprecations",
@@ -13,6 +14,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 };
 
 export const CATEGORY_SUMMARY_NOUN: Record<Category, { singular: string; plural: string }> = {
+  compromised: { singular: "compromised package", plural: "compromised packages" },
   security: { singular: "security fix", plural: "security fixes" },
   breaking: { singular: "breaking change", plural: "breaking changes" },
   deprecation: { singular: "deprecation", plural: "deprecations" },
@@ -20,7 +22,7 @@ export const CATEGORY_SUMMARY_NOUN: Record<Category, { singular: string; plural:
 };
 
 export function countByCategory(items: WorklistItem[]): Record<Category, number> {
-  const counts: Record<Category, number> = { security: 0, breaking: 0, deprecation: 0, minor: 0 };
+  const counts: Record<Category, number> = { compromised: 0, security: 0, breaking: 0, deprecation: 0, minor: 0 };
   for (const item of items) counts[item.category] += 1;
   return counts;
 }
