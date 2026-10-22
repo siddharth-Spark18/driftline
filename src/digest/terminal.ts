@@ -1,6 +1,7 @@
 import picocolors from "picocolors";
 import { cooldownMessage } from "../scan/cooldown.ts";
-import type { WorklistItem } from "../scan/types.ts";
+import type { SkippedSummary, WorklistItem } from "../scan/types.ts";
+import { LIMITS_FOOTER, safeVersionLines, skippedEmptyText, skippedHeadline, skippedReasonLines } from "./notes.ts";
 import { CATEGORY_LABELS, CATEGORY_ORDER, countByCategory, countPhrase, type Category } from "./categories.ts";
 
 export interface RenderOptions {
@@ -11,6 +12,8 @@ export interface RenderOptions {
   overflow?: number;
   /** Packages hidden by `preferences.ignorePackages`; rendered as an "N ignored" note. */
   ignored?: number;
+  /** Packages that couldn't be checked (no installed version). Rendered as a warning block; replaces the all-clear. */
+  skipped?: SkippedSummary;
   /** Defaults to the terminal width (80 when unknown); clamped to a readable range. */
   width?: number;
 }
@@ -49,8 +52,8 @@ const UNICODE_GLYPHS: Glyphs = {
   clock: "◷",
   logo: "◆",
   ellipsis: "…",
-  fill: { security: "█", breaking: "█", deprecation: "█", minor: "█" },
-  icon: { security: "✖", breaking: "▲", deprecation: "▼", minor: "●" },
+  fill: { compromised: "█", security: "█", breaking: "█", deprecation: "█", minor: "█" },
+  icon: { compromised: "‼", security: "✖", breaking: "▲", deprecation: "▼", minor: "●" },
 };
 
 // Used whenever color is off (NO_COLOR, pipes, logs): same layout, plain ASCII.
@@ -68,8 +71,8 @@ const ASCII_GLYPHS: Glyphs = {
   clock: "~",
   logo: "*",
   ellipsis: "...",
-  fill: { security: "#", breaking: "=", deprecation: "+", minor: "-" },
-  icon: { security: "x", breaking: "^", deprecation: "v", minor: "o" },
+  fill: { compromised: "@", security: "#", breaking: "=", deprecation: "+", minor: "-" },
+  icon: { compromised: "!", security: "x", breaking: "^", deprecation: "v", minor: "o" },
 };
 
 type Paint = (text: string) => string;
@@ -84,10 +87,19 @@ export function renderDigest(items: WorklistItem[], options: RenderOptions = {})
 
   lines.push(...renderBanner(options.repoLabel, width, g, pc));
 
+  const skipped = options.skipped && options.skipped.count > 0 ? options.skipped : undefined;
+  if (skipped) lines.push(...renderSkipped(skipped, width, pc));
+
   if (items.length === 0) {
     lines.push("");
-    lines.push("Nothing to report — tracked dependencies are up to date and clear of known advisories.");
+    // An all-clear is only honest when every package was actually checked.
+    lines.push(
+      skipped
+        ? skippedEmptyText(skipped)
+        : "Nothing to report — tracked dependencies are up to date and clear of known advisories.",
+    );
     lines.push(...ignoredNote(options.ignored, pc));
+    lines.push(...limitsFooter(width, pc));
     return lines.join("\n");
   }
 
@@ -114,8 +126,26 @@ export function renderDigest(items: WorklistItem[], options: RenderOptions = {})
   }
 
   lines.push(...ignoredNote(options.ignored, pc));
+  lines.push(...limitsFooter(width, pc));
 
   return lines.join("\n");
+}
+
+function limitsFooter(width: number, pc: Colors): string[] {
+  return ["", ...wrap(LIMITS_FOOTER, width).map((line) => pc.dim(line))];
+}
+
+function renderSkipped(skipped: SkippedSummary, width: number, pc: Colors): string[] {
+  const rows = [skippedHeadline(skipped), ...skippedReasonLines(skipped).map((line) => `- ${line}`)];
+  // The headline gets a "! " prefix, so it wraps two columns narrower to stay within the digest width.
+  return [
+    "",
+    ...rows.flatMap((row, i) =>
+      i === 0
+        ? wrap(row, width - 2).map((line) => pc.bold(pc.yellow(`! ${line}`)))
+        : wrap(row, width).map((line) => pc.yellow(line)),
+    ),
+  ];
 }
 
 function ignoredNote(ignored: number | undefined, pc: Colors): string[] {
@@ -196,10 +226,25 @@ function renderCard(item: WorklistItem, index: number, width: number, g: Glyphs,
     rows.push(`${v} ${badgesStyled}${" ".repeat(Math.max(0, inner - badgesPlain.length))} ${v}`);
   }
 
-  // Ignored packages aren't checked against the registry, so there is no "latest" to show.
-  rows.push(...body(item.ignored ? item.currentVersion : `${item.currentVersion} ${g.arrow} ${item.latestVersion}`, pc.bold));
-  if (item.ignored) rows.push(...body("on your ignore list (shown because of this advisory)", pc.dim));
-  rows.push(...body(item.reason));
+  if (item.category === "compromised") {
+    rows.push(...body(`${item.currentVersion} is listed as malicious`, (s) => pc.bold(pc.red(s))));
+    if (item.ignored) rows.push(...body("on your ignore list (shown because of this advisory)", pc.dim));
+    rows.push(...body(item.reason));
+    for (const line of safeVersionLines(item.safeVersions)) rows.push(...body(line, pc.dim));
+    if (item.otherAdvisoryCount) {
+      rows.push(...body(`+${item.otherAdvisoryCount} other ${item.otherAdvisoryCount === 1 ? "advisory" : "advisories"} also affect this version`, pc.dim));
+    }
+    rows.push(...body("Reinstall with npm ci, check install scripts, rotate credentials on affected machines and CI.", pc.yellow));
+  } else {
+    // Ignored packages aren't checked against the registry, so there is no "latest" to show.
+    rows.push(...body(item.ignored ? item.currentVersion : `${item.currentVersion} ${g.arrow} ${item.latestVersion}`, pc.bold));
+    if (item.ignored) rows.push(...body("on your ignore list (shown because of this advisory)", pc.dim));
+    rows.push(...body(item.reason));
+    if (item.category === "security") {
+      const fix = fixLine(item);
+      if (fix) rows.push(...body(fix, pc.green));
+    }
+  }
 
   if (item.affectedFiles) {
     const count = item.affectedFiles.length;
@@ -214,6 +259,14 @@ function renderCard(item: WorklistItem, index: number, width: number, g: Glyphs,
   return [border(g.tl + g.h.repeat(width - 2) + g.tr), ...rows, border(g.bl + g.h.repeat(width - 2) + g.br)];
 }
 
+/** "Fix: 1.0.1" beside `latest`, or why there is none. */
+function fixLine(item: WorklistItem): string | undefined {
+  if (item.fixedVersion) {
+    return `Fix: ${item.fixedVersion}${item.fixNeedsMajorUpgrade ? " (needs a major upgrade)" : ""}`;
+  }
+  return item.noFixPublished ? "no fixed version published" : undefined;
+}
+
 type Colors = ReturnType<typeof picocolors.createColors>;
 
 function badgeText(category: Category): string {
@@ -224,12 +277,12 @@ function categoryBadge(category: Category, pc: Colors): string {
   const text = badgeText(category);
   // Same visible width either way (brackets vs. padding), so layout math ignores color.
   if (!pc.isColorSupported) return text;
-  const bg = { security: pc.bgRed, breaking: pc.bgMagenta, deprecation: pc.bgYellow, minor: pc.bgCyan }[category];
+  const bg = { compromised: (s: string) => pc.bgRed(pc.white(s)), security: pc.bgRed, breaking: pc.bgMagenta, deprecation: pc.bgYellow, minor: pc.bgCyan }[category];
   return pc.bold(bg(pc.black(` ${category.toUpperCase()} `)));
 }
 
 function categoryPaint(category: Category, pc: Colors): Paint {
-  return { security: pc.red, breaking: pc.magenta, deprecation: pc.yellow, minor: pc.cyan }[category];
+  return { compromised: (s: string) => pc.bold(pc.red(s)), security: pc.red, breaking: pc.magenta, deprecation: pc.yellow, minor: pc.cyan }[category];
 }
 
 function severityPaint(severity: NonNullable<WorklistItem["severity"]>, pc: Colors): Paint {

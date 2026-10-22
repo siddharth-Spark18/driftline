@@ -140,7 +140,8 @@ describe("renderDigest: overflow and ignored lines", () => {
   it("shows the 'N ignored' note on a populated digest (regression)", () => {
     const out = renderDigest([item()], { color: false, ignored: 3 });
     assert.match(out, /3 ignored \(preferences\.ignorePackages\)/);
-    assert.ok(out.trimEnd().endsWith("3 ignored (preferences.ignorePackages)"));
+    // The honest-limits footer now closes the digest, so the note just has to precede it.
+    assert.ok(out.indexOf("3 ignored (preferences.ignorePackages)") < out.indexOf("Based on OSV.dev"));
   });
 
   it("shows the 'N ignored' note even when nothing else is reported", () => {

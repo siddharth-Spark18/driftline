@@ -1,6 +1,7 @@
 // Preloaded into the CLI child process (node --import) so `fetch` hits an in-memory
 // fake of the npm registry, OSV and GitHub instead of the network. Driven by:
-//   DRIFTLINE_TEST_FIXTURE  path to JSON { latest, times, osv }
+//   DRIFTLINE_TEST_FIXTURE  path to JSON { latest, times, osv, versions? }
+//     versions: package name -> version list, served as `versions` on the full packument (omitted when absent)
 //   DRIFTLINE_TEST_LOG      file every requested URL is appended to
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -20,7 +21,11 @@ globalThis.fetch = async (input, init) => {
       const version = fixture.latest[name];
       return version ? json(200, { version, repository: fixture.repository?.[name] }) : json(404, {});
     }
-    return json(200, { time: fixture.times?.[path] ?? {} });
+    const versions = fixture.versions?.[path];
+    return json(200, {
+      time: fixture.times?.[path] ?? {},
+      ...(versions ? { versions: Object.fromEntries(versions.map((v) => [v, {}])) } : {}),
+    });
   }
   if (url === "https://api.osv.dev/v1/query") {
     const body = JSON.parse(String(init.body));

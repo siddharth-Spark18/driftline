@@ -31,6 +31,10 @@ test("fetchAdvisories maps OSV vulns to Advisory records, preferring the ADVISOR
       summary: "Prototype pollution",
       severity: "high",
       url: "https://github.com/advisories/GHSA-xxxx",
+      kind: "vulnerability",
+      intervals: [],
+      fixedVersions: [],
+      affectedVersions: [],
     },
   ]);
 });

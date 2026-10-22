@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { UsageError } from "../lib/errors.ts";
-import type { InstalledPackage } from "../scan/types.ts";
+import type { InstalledPackage, SkipReason } from "../scan/types.ts";
 import { discoverWorkspaceMembers } from "./workspaces.ts";
 
 export interface StackIngestionResult {
@@ -62,7 +62,7 @@ export function ingestStack(repoPath: string): StackIngestionResult {
     collectRanges(memberPkg.devDependencies, true, declared);
   }
 
-  const installed = readLockfileVersions(repoPath, warnings);
+  const { installed, status } = readLockfileVersions(repoPath, warnings);
 
   // Cross-package deps within a monorepo (e.g. one member depending on a sibling member)
   // resolve via an npm `link` entry with no version in the lockfile; fall back to that
@@ -75,12 +75,17 @@ export function ingestStack(repoPath: string): StackIngestionResult {
   }
 
   const packages: InstalledPackage[] = [...declared.entries()]
-    .map(([name, { range, dev }]) => ({
-      name,
-      declaredRange: range,
-      dev,
-      installedVersion: installed.get(name) ?? localVersions.get(name) ?? null,
-    }))
+    .map(([name, { range, dev }]): InstalledPackage => {
+      const installedVersion = installed.get(name) ?? localVersions.get(name) ?? null;
+      return {
+        name,
+        declaredRange: range,
+        dev,
+        installedVersion,
+        // Recorded so the scan can say why a package wasn't checked.
+        ...(installedVersion === null ? { skipReason: SKIP_REASON_BY_STATUS[status] } : {}),
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return { packages, warnings };
@@ -95,15 +100,35 @@ function collectRanges(section: unknown, dev: boolean, into: Map<string, { range
   }
 }
 
-function readLockfileVersions(repoPath: string, warnings: string[]): Map<string, string> {
+type LockfileStatus = "ok" | "missing" | "unsupported" | "unreadable";
+
+const SKIP_REASON_BY_STATUS: Record<LockfileStatus, SkipReason> = {
+  ok: "not-in-lockfile",
+  missing: "no-lockfile",
+  unsupported: "unsupported-lockfile",
+  unreadable: "lockfile-unreadable",
+};
+
+// Lockfiles from other package managers: detected only to explain why nothing could be resolved.
+const OTHER_LOCKFILES = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"];
+
+function readLockfileVersions(
+  repoPath: string,
+  warnings: string[],
+): { installed: Map<string, string>; status: LockfileStatus } {
   const lockPath = join(repoPath, "package-lock.json");
   const installed = new Map<string, string>();
 
   if (!existsSync(lockPath)) {
-    warnings.push(
-      "No package-lock.json found — falling back to declared semver ranges, not resolved installed versions.",
-    );
-    return installed;
+    const other = OTHER_LOCKFILES.find((file) => existsSync(join(repoPath, file)));
+    if (other) {
+      warnings.push(
+        `Found ${other}, but Driftline only reads package-lock.json — packages without an installed version are skipped, not checked.`,
+      );
+      return { installed, status: "unsupported" };
+    }
+    warnings.push("No package-lock.json found — packages without an installed version are skipped, not checked.");
+    return { installed, status: "missing" };
   }
 
   let lock: Record<string, unknown>;
@@ -111,9 +136,9 @@ function readLockfileVersions(repoPath: string, warnings: string[]): Map<string,
     lock = JSON.parse(readFileSync(lockPath, "utf8"));
   } catch (err) {
     warnings.push(
-      `package-lock.json is not valid JSON (${(err as Error).message}) — falling back to declared semver ranges.`,
+      `package-lock.json is not valid JSON (${(err as Error).message}) — packages without an installed version are skipped, not checked.`,
     );
-    return installed;
+    return { installed, status: "unreadable" };
   }
 
   const lockfileVersion = typeof lock.lockfileVersion === "number" ? lock.lockfileVersion : 0;
@@ -141,8 +166,11 @@ function readLockfileVersions(repoPath: string, warnings: string[]): Map<string,
       if (typeof version === "string") installed.set(name, version);
     }
   } else {
-    warnings.push("package-lock.json format not recognized — falling back to declared semver ranges.");
+    warnings.push(
+      "package-lock.json format not recognized — packages without an installed version are skipped, not checked.",
+    );
+    return { installed, status: "unreadable" };
   }
 
-  return installed;
+  return { installed, status: "ok" };
 }

@@ -81,3 +81,41 @@ export async function fetchPublishTime(
   if (typeof published !== "string" || Number.isNaN(Date.parse(published))) return undefined;
   return new Date(published).toISOString();
 }
+
+export interface VersionList {
+  versions: string[];
+  /** Version -> ISO publish date, for the versions that have a parseable one. */
+  times: Record<string, string>;
+}
+
+/**
+ * Fetches every published version plus publish dates from the full packument.
+ * Heavy, so it is only called for compromised items. `null` on any failure.
+ */
+export async function fetchVersionList(name: string, fetchImpl: FetchLike = fetch): Promise<VersionList | null> {
+  let res: Response;
+  try {
+    res = await fetchImpl(registryUrlFor(name, ""));
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+
+  let data: { versions?: unknown; time?: unknown };
+  try {
+    data = (await res.json()) as { versions?: unknown; time?: unknown };
+  } catch {
+    return null;
+  }
+  if (!data.versions || typeof data.versions !== "object") return null;
+
+  const times: Record<string, string> = {};
+  if (data.time && typeof data.time === "object") {
+    for (const [version, published] of Object.entries(data.time as Record<string, unknown>)) {
+      if (typeof published === "string" && !Number.isNaN(Date.parse(published))) {
+        times[version] = new Date(published).toISOString();
+      }
+    }
+  }
+  return { versions: Object.keys(data.versions), times };
+}

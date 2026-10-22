@@ -9,15 +9,16 @@ const SEVERITY_ORDER: Record<Severity, number> = {
 };
 
 const CATEGORY_ORDER: Record<WorklistItem["category"], number> = {
-  security: 0,
-  breaking: 1,
-  deprecation: 2,
-  minor: 3,
+  compromised: 0,
+  security: 1,
+  breaking: 2,
+  deprecation: 3,
+  minor: 4,
 };
 
 /**
- * Orders a worklist per the brief's rule-based priority: security fix (by
- * severity) > breaking change > deprecation > minor/feature, then by name.
+ * Orders a worklist per the brief's rule-based priority: compromised package,
+ * security fix (by severity) > breaking change > deprecation > minor/feature, then by name.
  * Deterministic — no Claude API involved.
  */
 export function rankWorklist(items: WorklistItem[]): WorklistItem[] {
@@ -41,12 +42,12 @@ export interface CappedWorklist {
 }
 
 /**
- * Applies the top-N cap to an already-ranked worklist. Security items are never
- * dropped, so the result can exceed `maxItems` when there are more than that
- * many security items.
+ * Applies the top-N cap to an already-ranked worklist. Compromised and security
+ * items are never dropped, so the result can exceed `maxItems` when there are
+ * more than that many of them.
  */
 export function capWorklist(ranked: WorklistItem[], maxItems: number): CappedWorklist {
-  const securityCount = ranked.filter((item) => item.category === "security").length;
-  const keep = Math.max(maxItems, securityCount);
+  const protectedCount = ranked.filter((item) => item.category === "compromised" || item.category === "security").length;
+  const keep = Math.max(maxItems, protectedCount);
   return { items: ranked.slice(0, keep), overflow: Math.max(0, ranked.length - keep) };
 }

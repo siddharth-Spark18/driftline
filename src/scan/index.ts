@@ -4,15 +4,16 @@ import semver from "semver";
 import { buildPrompt, findVerifyScripts } from "../prompt/build.ts";
 import { fetchAdvisories, type Advisory } from "./advisories.ts";
 import { computeCooldown } from "./cooldown.ts";
+import { chooseFix, chooseSafeVersions } from "./fixes.ts";
 import { createIgnoreMatcher } from "./ignore.ts";
 import { loadPublishCache, publishCacheKey, savePublishCache, type PublishTimes } from "./publish-cache.ts";
 import { capWorklist, rankWorklist } from "./rank.ts";
-import { fetchLatestVersion, fetchPublishTime } from "./registry.ts";
+import { fetchLatestVersion, fetchPublishTime, fetchVersionList } from "./registry.ts";
 import { describeRelease, type ReleaseLookupState } from "./releases.ts";
-import type { InstalledPackage, Severity, WorklistItem } from "./types.ts";
+import type { InstalledPackage, SkippedSummary, SkipReason, Severity, WorklistItem } from "./types.ts";
 import { detectUsage } from "./usage.ts";
 
-export type { InstalledPackage, WorklistItem, UpdateCategory, Severity } from "./types.ts";
+export type { InstalledPackage, WorklistItem, UpdateCategory, Severity, SkippedSummary, SkipReason } from "./types.ts";
 export { rankWorklist, capWorklist } from "./rank.ts";
 
 type FetchLike = typeof fetch;
@@ -44,6 +45,17 @@ export interface ScanResult {
   overflow: number;
   /** Packages hidden by the ignore list (ignored packages shown because of an advisory are not counted). */
   ignored: number;
+  /** Packages that couldn't be checked for lack of an installed version. */
+  skipped: SkippedSummary;
+}
+
+/** Per-scan state shared by every `scanPackage` call. */
+interface ScanContext {
+  fetchImpl: FetchLike;
+  releaseState: ReleaseLookupState;
+  cooldownDays: number;
+  /** Publish times already seen in a version list (compromised items), so they aren't fetched twice. */
+  knownTimes: PublishTimes;
 }
 
 const DEFAULT_COOLDOWN_DAYS = 3;
@@ -80,9 +92,8 @@ export async function runScan(packages: InstalledPackage[], options: ScanOptions
   const isIgnored = createIgnoreMatcher(options.ignorePackages ?? []);
 
   options.onProgress?.(`Checking ${packages.length} ${packages.length === 1 ? "package" : "packages"} against the registry and advisories`);
-  const scanned = await Promise.all(
-    packages.map((pkg) => scanPackage(pkg, fetchImpl, releaseState, isIgnored(pkg.name))),
-  );
+  const context: ScanContext = { fetchImpl, releaseState, cooldownDays, knownTimes: {} };
+  const scanned = await Promise.all(packages.map((pkg) => scanPackage(pkg, context, isIgnored(pkg.name))));
   const found = scanned.filter((item): item is WorklistItem => item !== null);
   const ignored = packages.filter((pkg) => isIgnored(pkg.name)).length - found.filter((item) => item.ignored).length;
 
@@ -95,12 +106,28 @@ export async function runScan(packages: InstalledPackage[], options: ScanOptions
   const ranked = rankWorklist(found);
   const { items, overflow } = options.maxItems === undefined ? { items: ranked, overflow: 0 } : capWorklist(ranked, options.maxItems);
 
-  await attachPublishTimes(items, cooldownDays, fetchImpl, options);
+  await attachPublishTimes(items, cooldownDays, fetchImpl, options, context.knownTimes);
 
   if (options.repoPath && items.length > 0) options.onProgress?.("Detecting affected files and building prompts");
   if (options.repoPath) attachUsageAndPrompts(options.repoPath, items);
 
-  return { items, overflow, ignored };
+  return { items, overflow, ignored, skipped: summarizeSkipped(packages) };
+}
+
+function summarizeSkipped(packages: InstalledPackage[]): SkippedSummary {
+  const reasons: Record<SkipReason, number> = {
+    "no-lockfile": 0,
+    "unsupported-lockfile": 0,
+    "lockfile-unreadable": 0,
+    "not-in-lockfile": 0,
+  };
+  let count = 0;
+  for (const pkg of packages) {
+    if (pkg.installedVersion) continue;
+    reasons[pkg.skipReason ?? "no-lockfile"] += 1;
+    count += 1;
+  }
+  return { count, total: packages.length, reasons };
 }
 
 /** Looks up publish times (disk cache first) and flags young releases. Ignored items never reach the registry. */
@@ -109,6 +136,7 @@ async function attachPublishTimes(
   cooldownDays: number,
   fetchImpl: FetchLike,
   options: ScanOptions,
+  knownTimes: PublishTimes,
 ): Promise<void> {
   const lookups = items.filter((item) => !item.ignored);
   if (lookups.length > 0) options.onProgress?.("Looking up release dates");
@@ -118,7 +146,7 @@ async function attachPublishTimes(
   await Promise.all(
     lookups.map(async (item) => {
       const key = publishCacheKey(item.name, item.latestVersion);
-      const releasedAt = cached[key] ?? (await fetchPublishTime(item.name, item.latestVersion, fetchImpl));
+      const releasedAt = cached[key] ?? knownTimes[key] ?? (await fetchPublishTime(item.name, item.latestVersion, fetchImpl));
       if (!releasedAt) return;
 
       // Only successful, parseable times are cached; failures are retried next run.
@@ -144,8 +172,9 @@ function attachUsageAndPrompts(repoPath: string, items: WorklistItem[]): void {
   for (const item of items) {
     item.affectedFiles = usage.get(item.name) ?? [];
     item.usageDetected = item.affectedFiles.length > 0;
-    // An ignored package is only shown for its advisory; no upgrade task is generated for it.
-    const prompt = item.ignored ? null : buildPrompt(item, context);
+    // An ignored package is only shown for its advisory; no upgrade task is generated for it
+    // (a compromised one still gets its remediation prompt).
+    const prompt = item.ignored && item.category !== "compromised" ? null : buildPrompt(item, context);
     if (prompt) item.prompt = prompt;
   }
 }
@@ -160,18 +189,16 @@ function readVerifyScripts(repoPath: string): string[] {
   }
 }
 
-async function scanPackage(
-  pkg: InstalledPackage,
-  fetchImpl: FetchLike,
-  releaseState: ReleaseLookupState,
-  ignored: boolean,
-): Promise<WorklistItem | null> {
+async function scanPackage(pkg: InstalledPackage, context: ScanContext, ignored: boolean): Promise<WorklistItem | null> {
   if (!pkg.installedVersion) return null; // nothing to diff without a resolved version
+  const { fetchImpl, releaseState } = context;
 
   // Ignored packages skip the registry and release lookups, but a known advisory is still worth showing.
   if (ignored) {
     const advisories = await fetchAdvisories(pkg.name, pkg.installedVersion, fetchImpl);
     if (advisories.length === 0) return null;
+    const compromised = await compromisedItem(pkg.name, pkg.installedVersion, pkg.installedVersion, advisories, context);
+    if (compromised) return { ...compromised, ignored: true };
     const worst = mostSevere(advisories);
     return {
       name: pkg.name,
@@ -181,15 +208,24 @@ async function scanPackage(
       severity: worst.severity,
       reason: worst.summary,
       advisoryUrl: worst.url,
+      advisoryIds: advisories.map((advisory) => advisory.id),
+      ...chooseFix(pkg.installedVersion, advisories),
       ignored: true,
     };
   }
 
   const registryInfo = await fetchLatestVersion(pkg.name, fetchImpl);
-  if (!registryInfo) return null;
+  if (!registryInfo) {
+    // A registry miss drops ordinary items, but a known-malicious version must still be shown.
+    const advisories = await fetchAdvisories(pkg.name, pkg.installedVersion, fetchImpl);
+    return compromisedItem(pkg.name, pkg.installedVersion, pkg.installedVersion, advisories, context);
+  }
 
   const advisories = await fetchAdvisories(pkg.name, pkg.installedVersion, fetchImpl);
   if (advisories.length > 0) {
+    const compromised = await compromisedItem(pkg.name, pkg.installedVersion, registryInfo.latestVersion, advisories, context);
+    if (compromised) return compromised;
+
     const worst = mostSevere(advisories);
     return {
       name: pkg.name,
@@ -199,6 +235,8 @@ async function scanPackage(
       severity: worst.severity,
       reason: worst.summary,
       advisoryUrl: worst.url,
+      advisoryIds: advisories.map((advisory) => advisory.id),
+      ...chooseFix(pkg.installedVersion, advisories),
     };
   }
 
@@ -245,6 +283,44 @@ async function scanPackage(
     category: "minor",
     reason: release?.reason ?? `New version available (${pkg.installedVersion} -> ${registryInfo.latestVersion}).`,
     releaseUrl: release?.releaseUrl,
+  };
+}
+
+/**
+ * Builds the compromised item when any advisory is a malicious-package one;
+ * compromised wins over ordinary vulnerabilities, which are only counted. The
+ * registry version list is fetched here and nowhere else.
+ */
+async function compromisedItem(
+  name: string,
+  installed: string,
+  latestVersion: string,
+  advisories: Advisory[],
+  context: ScanContext,
+): Promise<WorklistItem | null> {
+  const malicious = advisories.filter((advisory) => advisory.kind === "compromised");
+  if (malicious.length === 0) return null;
+
+  const versionList = await fetchVersionList(name, context.fetchImpl);
+  if (versionList) {
+    for (const [version, releasedAt] of Object.entries(versionList.times)) {
+      context.knownTimes[publishCacheKey(name, version)] = releasedAt;
+    }
+  }
+  const safeVersions = versionList
+    ? chooseSafeVersions(versionList.versions, versionList.times, installed, malicious, context.cooldownDays)
+    : { lookupFailed: true };
+
+  return {
+    name,
+    currentVersion: installed,
+    latestVersion,
+    category: "compromised",
+    reason: malicious[0].summary,
+    advisoryUrl: malicious[0].url,
+    advisoryIds: malicious.map((advisory) => advisory.id),
+    otherAdvisoryCount: advisories.length - malicious.length,
+    safeVersions,
   };
 }
 

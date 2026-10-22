@@ -17,8 +17,20 @@ export function computeCooldown(
   return daysOld < cooldownDays ? { daysOld } : undefined;
 }
 
+/** Whole days since `releasedAt`, or `undefined` when missing or unparseable. */
+export function daysSince(releasedAt: string | undefined, now: number = Date.now()): number | undefined {
+  if (!releasedAt) return undefined;
+  const published = Date.parse(releasedAt);
+  if (Number.isNaN(published)) return undefined;
+  return Math.max(0, Math.floor((now - published) / DAY_MS));
+}
+
+/** "today" / "1 day ago" / "N days ago". */
+export function ageText(daysOld: number): string {
+  return daysOld === 0 ? "today" : daysOld === 1 ? "1 day ago" : `${daysOld} days ago`;
+}
+
 /** Shared flag text for the terminal report and the agent prompt. */
 export function cooldownMessage(daysOld: number): string {
-  const age = daysOld === 0 ? "today" : daysOld === 1 ? "1 day ago" : `${daysOld} days ago`;
-  return `released ${age}, consider waiting`;
+  return `released ${ageText(daysOld)}, consider waiting`;
 }

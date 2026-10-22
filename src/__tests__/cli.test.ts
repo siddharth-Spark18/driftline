@@ -60,7 +60,16 @@ test("scan --json on a repo with no dependencies returns an empty worklist witho
   assert.equal(result.status, 0);
   assert.match(result.stderr, /No package-lock\.json found/);
   const parsed = JSON.parse(result.stdout);
-  assert.deepEqual(parsed, { ok: true, data: [], overflow: 0 });
+  assert.deepEqual(parsed, {
+    ok: true,
+    data: [],
+    overflow: 0,
+    skipped: {
+      count: 0,
+      total: 0,
+      reasons: { "no-lockfile": 0, "unsupported-lockfile": 0, "lockfile-unreadable": 0, "not-in-lockfile": 0 },
+    },
+  });
 });
 
 test("scan on a repo with no dependencies prints a clean terminal digest and caches the result", () => {

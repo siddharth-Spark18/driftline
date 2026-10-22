@@ -40,14 +40,14 @@ describe("buildJsonReport", () => {
     assert.equal(parsed.repo, "/repo");
     assert.equal(parsed.driftlineVersion, "0.1.0");
     assert.equal(parsed.overflow, 4);
-    assert.deepEqual(parsed.summary, { total: 3, security: 2, breaking: 0, deprecation: 0, minor: 1 });
+    assert.deepEqual(parsed.summary, { total: 3, compromised: 0, security: 2, breaking: 0, deprecation: 0, minor: 1 });
     assert.deepEqual(parsed.worklist, worklist);
   });
 
   it("reports overflow 0 and an empty summary for an empty worklist", () => {
     const parsed = JSON.parse(buildJsonReport(data({ worklist: [] })));
     assert.equal(parsed.overflow, 0);
-    assert.deepEqual(parsed.summary, { total: 0, security: 0, breaking: 0, deprecation: 0, minor: 0 });
+    assert.deepEqual(parsed.summary, { total: 0, compromised: 0, security: 0, breaking: 0, deprecation: 0, minor: 0 });
   });
 });
 

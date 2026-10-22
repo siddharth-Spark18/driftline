@@ -31,7 +31,11 @@ In a terminal, Driftline first asks whether you want the report as terminal outp
 - one card per package with its versions, the reason, how many files use it, and a link to the release or advisory
 - a note when a release is very new (see `--cooldown-days`)
 
-Items are ranked: security fixes (by severity), then breaking changes, deprecations and minor updates.
+Items are ranked: compromised packages first, then security fixes (by severity), breaking changes, deprecations and minor updates.
+
+- **Compromised packages**: an installed version listed as malicious by OSV (`MAL-...` entries, or advisories tagged CWE-506) gets a loud card that is never dropped by the cap, even for ignored packages. It shows two labeled versions, "last known-good before the bad versions" and "newest not listed as bad" (with its age and the cooldown note). These are information, not a guarantee. Its prompt tells your agent to investigate and report, never to change the pin on its own: reinstall with `npm ci`, check install scripts, rotate credentials, and ask you which version to use.
+- **Security fixes** show the lowest fixed version in your release line (same major; same minor for 0.x) that fixes every advisory, beside `latest`. If your line has no fix, the lowest higher fix is shown as needing a major upgrade; if nothing is published as fixed, the card says so. Prompts target the fix and mention `latest`.
+- **Skipped packages**: packages without a resolved installed version (no `package-lock.json`, an unsupported pnpm/yarn/bun lockfile, an unreadable lockfile, or a package missing from it) are counted in a warning block at the top instead of an all-clear. The exit code stays 0.
 
 ## What you get
 
@@ -62,7 +66,7 @@ Files are named like `driftline-2026-10-09T14-30-05.md` and are never overwritte
 
 Global:
 
-- `--json`: print `{ ok, data }` / `{ ok: false, error }` envelopes instead of human-readable text. `scan` and `digest` also include `overflow`, the number of items hidden by the cap (`0` when none): `{ "ok": true, "data": [...], "overflow": 0 }`.
+- `--json`: print `{ ok, data }` / `{ ok: false, error }` envelopes instead of human-readable text. `scan` and `digest` also include `overflow`, the number of items hidden by the cap (`0` when none), and `skipped`, the packages that could not be checked: `{ "ok": true, "data": [...], "overflow": 0, "skipped": { "count": 0, "total": 12, "reasons": { "no-lockfile": 0, "unsupported-lockfile": 0, "lockfile-unreadable": 0, "not-in-lockfile": 0 } } }`. `skipped` is `null` when `digest` reads a cache written before it was tracked.
 - `--repo <path>`: the project to scan (defaults to the current directory).
 - `--config <path>`: use one config file and skip the project/global lookup.
 
@@ -122,7 +126,9 @@ driftline config list     # API key values are masked
 ## Limitations
 
 - npm/JS only; Python, Go and other ecosystems are not supported.
-- A lockfile is needed to know the installed versions. Packages without a resolved version are skipped.
+- Only `package-lock.json` is read to know the installed versions. pnpm, yarn and bun lockfiles are not supported: those packages are skipped and the digest says so.
+- Only direct dependencies are checked, not transitive ones.
+- Advisory data comes from OSV.dev and can lag, so a package compromised very recently may not be flagged yet. The version an upgrade moves to is not checked for advisories, and a version that is not listed as bad is not guaranteed clean. A release-age cooldown lowers risk but proves nothing.
 - "Affected files" detection is pattern-based, not a full code analysis, so each result carries a confidence level.
 
 ## Development

@@ -57,17 +57,20 @@ export function registerScanCommand(program: Command): void {
         } finally {
           spinner.stop();
         }
-        const { items: worklist, overflow, ignored } = result;
+        const { items: worklist, overflow, ignored, skipped } = result;
         const scannedAt = new Date().toISOString();
-        cacheLastScan(repoPath, worklist, overflow, ignored, scannedAt);
+        cacheLastScan(repoPath, worklist, overflow, ignored, skipped, scannedAt);
 
         // PER-11: terminal digest is the human-readable path (manual or cron
         // invocation); --json stays the scriptable raw worklist.
-        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow, ignored }), outputOpts, { overflow });
+        printSuccess(worklist, renderDigest(worklist, { repoLabel: repoPath, overflow, ignored, skipped }), outputOpts, {
+          overflow,
+          skipped,
+        });
         // After the digest so a write failure (exit 1) still leaves the result on screen.
         saveReport(
           saveChoice,
-          { scannedAt, repo: repoPath, driftlineVersion: readOwnPackageJson().version, overflow, worklist },
+          { scannedAt, repo: repoPath, driftlineVersion: readOwnPackageJson().version, overflow, skipped, worklist },
           outputOpts,
         );
       }),
@@ -83,8 +86,15 @@ function parseIntegerFlag(flag: string, raw: unknown, min: number): number | und
   return value;
 }
 
-function cacheLastScan(repoPath: string, worklist: unknown, overflow: number, ignored: number, scannedAt: string): void {
+function cacheLastScan(
+  repoPath: string,
+  worklist: unknown,
+  overflow: number,
+  ignored: number,
+  skipped: unknown,
+  scannedAt: string,
+): void {
   const cachePath = lastScanPath(repoPath);
   mkdirSync(dirname(cachePath), { recursive: true });
-  writeFileSync(cachePath, JSON.stringify({ scannedAt, worklist, overflow, ignored }, null, 2));
+  writeFileSync(cachePath, JSON.stringify({ scannedAt, worklist, overflow, ignored, skipped }, null, 2));
 }
